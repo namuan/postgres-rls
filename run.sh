@@ -128,11 +128,22 @@ start_api
 
 # ---------------------------------------------------------------------------
 echo
+
 echo "=========================================="
 echo "RLS demo stack is up:"
 echo "  PostgreSQL : 127.0.0.1:$HOST_PORT (container '$CONTAINER')"
 echo "  API + WebUI: http://127.0.0.1:$API_PORT/   (pid $(cat "$API_PIDFILE"))"
 echo "  API log    : $API_LOG"
+echo
+echo "  IntelliJ database client (Database tool window / DataGrip):"
+echo "    JDBC URL : jdbc:postgresql://127.0.0.1:$HOST_PORT/$DB"
+echo "    with auth: jdbc:postgresql://127.0.0.1:$HOST_PORT/$DB?user=app_user&password=app_user_demo_password"
+echo "    user     : app_user  (least privilege - RLS filters its rows)"
+echo "    user     : postgres  (superuser - bypasses RLS, demo/exploration only)"
+echo "    passwords: app_user_demo_password / postgres_demo_password"
+echo "    (In IntelliJ: Database tool window -> + -> PostgreSQL -> paste the"
+echo "     URL into the 'URL' field, or fill Host/Port/Database/User.)"
+echo
 echo "  Next       : ./test.sh  ./api_test.sh  ./property_test.sh"
 echo "  Teardown   : ./stop.sh"
 echo "  Re-run     : ./run.sh  (restarts everything)"
