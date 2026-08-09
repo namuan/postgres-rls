@@ -138,6 +138,7 @@ echo
 echo "  IntelliJ database client (Database tool window / DataGrip):"
 echo "    JDBC URL : jdbc:postgresql://127.0.0.1:$HOST_PORT/$DB"
 echo "    with auth: jdbc:postgresql://127.0.0.1:$HOST_PORT/$DB?user=app_user&password=app_user_demo_password"
+echo "    superuser: jdbc:postgresql://127.0.0.1:$HOST_PORT/$DB?user=postgres&password=postgres_demo_password"
 echo "    user     : app_user  (least privilege - RLS filters its rows)"
 echo "    user     : postgres  (superuser - bypasses RLS, demo/exploration only)"
 echo "    passwords: app_user_demo_password / postgres_demo_password"
