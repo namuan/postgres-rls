@@ -1,0 +1,83 @@
+{
+  "url": "http://127.0.0.1:8081",
+  "out": "/Users/nnn/workspace/postgres-rls/screenshots",
+  "generatedAt": "2026-08-09T19:06:17.019Z",
+  "colorScheme": "light",
+  "shots": [
+    {
+      "name": "01-signed-out-default-deny",
+      "captures": [
+        {
+          "file": "/Users/nnn/workspace/postgres-rls/screenshots/01-signed-out-default-deny.png",
+          "viewport": {
+            "width": 1440,
+            "height": 900
+          },
+          "colorScheme": "light",
+          "fullPage": true,
+          "element": null
+        }
+      ]
+    },
+    {
+      "name": "02-alice-ledger-redacted",
+      "captures": [
+        {
+          "file": "/Users/nnn/workspace/postgres-rls/screenshots/02-alice-ledger-redacted.png",
+          "viewport": {
+            "width": 1440,
+            "height": 900
+          },
+          "colorScheme": "light",
+          "fullPage": true,
+          "element": null
+        }
+      ]
+    },
+    {
+      "name": "03-bob-ledger-redacted",
+      "captures": [
+        {
+          "file": "/Users/nnn/workspace/postgres-rls/screenshots/03-bob-ledger-redacted.png",
+          "viewport": {
+            "width": 1440,
+            "height": 900
+          },
+          "colorScheme": "light",
+          "fullPage": true,
+          "element": null
+        }
+      ]
+    },
+    {
+      "name": "04-with-check-rejection",
+      "captures": [
+        {
+          "file": "/Users/nnn/workspace/postgres-rls/screenshots/04-with-check-rejection.png",
+          "viewport": {
+            "width": 1440,
+            "height": 900
+          },
+          "colorScheme": "light",
+          "fullPage": true,
+          "element": null
+        }
+      ]
+    },
+    {
+      "name": "05-alice-ledger-mobile",
+      "captures": [
+        {
+          "file": "/Users/nnn/workspace/postgres-rls/screenshots/05-alice-ledger-mobile.png",
+          "viewport": {
+            "width": 390,
+            "height": 844
+          },
+          "colorScheme": "light",
+          "fullPage": true,
+          "element": null
+        }
+      ]
+    }
+  ]
+}

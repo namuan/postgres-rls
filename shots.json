@@ -1,0 +1,65 @@
+{
+  "url": "http://127.0.0.1:8081",
+  "out": "screenshots",
+  "viewport": { "width": 1440, "height": 900 },
+  "deviceScaleFactor": 2,
+  "colorScheme": "light",
+  "settle": 500,
+  "fullPage": true,
+  "timeout": 20000,
+  "shots": [
+    {
+      "name": "01-signed-out-default-deny",
+      "steps": [
+        { "goto": "/" },
+        { "wait": "#emptyLedger" },
+        { "sleep": 600 }
+      ]
+    },
+    {
+      "name": "02-alice-ledger-redacted",
+      "steps": [
+        { "goto": "/" },
+        { "click": ".demo-logins button[data-email=\"alice@alpha.example\"]" },
+        { "wait": "#ledgerBody tr" },
+        { "wait": "#truthLine" },
+        { "sleep": 700 }
+      ]
+    },
+    {
+      "name": "03-bob-ledger-redacted",
+      "steps": [
+        { "goto": "/" },
+        { "click": ".demo-logins button[data-email=\"bob@beta.example\"]" },
+        { "wait": "#ledgerBody tr" },
+        { "wait": "#truthLine" },
+        { "sleep": 700 }
+      ]
+    },
+    {
+      "name": "04-with-check-rejection",
+      "steps": [
+        { "goto": "/" },
+        { "click": ".demo-logins button[data-email=\"alice@alpha.example\"]" },
+        { "wait": "#ledgerBody tr" },
+        { "fill": { "sel": "#newTitle", "value": "Unpublished Draft" } },
+        { "fill": { "sel": "#newBody", "value": "rejected by the restrictive WITH CHECK" } },
+        { "click": "#newPublished" },
+        { "click": "#createForm button[type=\"submit\"]" },
+        { "wait": "#journal li:first-child .status.bad" },
+        { "sleep": 700 }
+      ]
+    },
+    {
+      "name": "05-alice-ledger-mobile",
+      "viewports": [{ "width": 390, "height": 844 }],
+      "steps": [
+        { "goto": "/" },
+        { "click": ".demo-logins button[data-email=\"alice@alpha.example\"]" },
+        { "wait": "#ledgerBody tr" },
+        { "wait": "#truthLine" },
+        { "sleep": 700 }
+      ]
+    }
+  ]
+}

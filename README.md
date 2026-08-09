@@ -47,6 +47,8 @@ bench.sh                Benchmark harness: pgbench auth primitives + k6 end-to-e
 bench/load.js           k6 scenario: 85% reads / 10% writes / 5% logins, two tenants
 api.http                IntelliJ HTTP Client requests — try every endpoint from the IDE
 postgres-rls-process.html   Visual walkthrough of the whole system (open in a browser)
+screenshots/            Captured WebUI screens (embedded in the WebUI section)
+shots.json              Spec used to regenerate screenshots/ (webapp-shots skill)
 README.md               This file
 ```
 
@@ -164,6 +166,16 @@ paper "tenancy ledger":
   watch the redaction swap sides.
 - **04 Request journal** — every API call the page makes, with its HTTP
   status, including the database's own rejection message on 403s.
+
+### Screens
+
+| Signed out — default deny | Alice — 3 rows visible, 4 redacted |
+| --- | --- |
+| ![Signed out](screenshots/01-signed-out-default-deny.png) | ![Alice's ledger](screenshots/02-alice-ledger-redacted.png) |
+| Bob — 2 rows visible, 5 redacted | `WITH CHECK` rejection → HTTP 403 in the journal |
+| ![Bob's ledger](screenshots/03-bob-ledger-redacted.png) | ![WITH CHECK rejection](screenshots/04-with-check-rejection.png) |
+| Mobile (390 px) | |
+| ![Mobile](screenshots/05-alice-ledger-mobile.png) | |
 
 ## Design
 

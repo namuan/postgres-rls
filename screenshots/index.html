@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contact sheet — http://127.0.0.1:8081</title>
+<style>
+  :root { color-scheme: dark }
+  * { box-sizing: border-box }
+  body { margin: 0; background: #0b0e14; color: #d7dae0; font: 14px/1.45 -apple-system, "SF Pro Text", "Segoe UI", sans-serif }
+  header { position: sticky; top: 0; z-index: 2; padding: 14px 22px; background: rgba(11,14,20,.9); backdrop-filter: blur(10px); border-bottom: 1px solid #1c2230; display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap }
+  h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .2px }
+  h1 code { color: #7ee0a3; font-weight: 500 }
+  .meta { color: #6b7385; font-size: 12px }
+  input { margin-left: auto; background: #141a26; border: 1px solid #232b3d; color: #d7dae0; border-radius: 8px; padding: 6px 12px; font: inherit; width: 220px; outline: none }
+  input:focus { border-color: #3b4a6b }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; padding: 22px }
+  .card { display: block; background: #11161f; border: 1px solid #1c2230; border-radius: 12px; overflow: hidden; text-decoration: none; color: inherit; transition: border-color .15s, transform .15s }
+  .card:hover { border-color: #33405c; transform: translateY(-2px) }
+  .thumb { height: 190px; background: #0e121a; border-bottom: 1px solid #1c2230; overflow: hidden }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block }
+  .cap { padding: 10px 12px }
+  .name { font-weight: 600; font-size: 13px; word-break: break-all }
+  .meta { color: #6b7385; font-size: 11px; margin-top: 3px; word-break: break-all }
+  .empty { padding: 60px 22px; text-align: center; color: #6b7385; display: none }
+  .hidden { display: none !important }
+</style>
+</head>
+<body>
+<header>
+  <h1>Contact sheet — <code>http://127.0.0.1:8081</code></h1>
+  <span class="meta">5 captures · 8/9/2026, 8:06:17 PM</span>
+  <input id="q" type="search" placeholder="filter by name…" title="press / to focus">
+</header>
+<div class="grid" id="grid">
+      <a class="card" href="01-signed-out-default-deny.png" target="_blank" title="Open 01-signed-out-default-deny.png">
+        <div class="thumb"><img loading="lazy" src="01-signed-out-default-deny.png" alt="01-signed-out-default-deny"></div>
+        <div class="cap"><div class="name">01-signed-out-default-deny</div><div class="meta">01-signed-out-default-deny.png  ·  1440×900 · light · full-page</div></div>
+      </a>
+      <a class="card" href="02-alice-ledger-redacted.png" target="_blank" title="Open 02-alice-ledger-redacted.png">
+        <div class="thumb"><img loading="lazy" src="02-alice-ledger-redacted.png" alt="02-alice-ledger-redacted"></div>
+        <div class="cap"><div class="name">02-alice-ledger-redacted</div><div class="meta">02-alice-ledger-redacted.png  ·  1440×900 · light · full-page</div></div>
+      </a>
+      <a class="card" href="03-bob-ledger-redacted.png" target="_blank" title="Open 03-bob-ledger-redacted.png">
+        <div class="thumb"><img loading="lazy" src="03-bob-ledger-redacted.png" alt="03-bob-ledger-redacted"></div>
+        <div class="cap"><div class="name">03-bob-ledger-redacted</div><div class="meta">03-bob-ledger-redacted.png  ·  1440×900 · light · full-page</div></div>
+      </a>
+      <a class="card" href="04-with-check-rejection.png" target="_blank" title="Open 04-with-check-rejection.png">
+        <div class="thumb"><img loading="lazy" src="04-with-check-rejection.png" alt="04-with-check-rejection"></div>
+        <div class="cap"><div class="name">04-with-check-rejection</div><div class="meta">04-with-check-rejection.png  ·  1440×900 · light · full-page</div></div>
+      </a>
+      <a class="card" href="05-alice-ledger-mobile.png" target="_blank" title="Open 05-alice-ledger-mobile.png">
+        <div class="thumb"><img loading="lazy" src="05-alice-ledger-mobile.png" alt="05-alice-ledger-mobile"></div>
+        <div class="cap"><div class="name">05-alice-ledger-mobile</div><div class="meta">05-alice-ledger-mobile.png  ·  390×844 · light · full-page</div></div>
+      </a></div>
+<div class="empty" id="empty">No captures match.</div>
+<script>
+  const q = document.getElementById('q')
+  const cards = [...document.querySelectorAll('.card')]
+  const empty = document.getElementById('empty')
+  q.addEventListener('input', () => {
+    const t = q.value.trim().toLowerCase()
+    let n = 0
+    for (const c of cards) { const hit = !t || c.dataset.name.includes(t); c.classList.toggle('hidden', !hit); if (hit) n++ }
+    empty.style.display = n ? 'none' : 'block'
+  })
+  for (const c of cards) c.dataset.name = (c.querySelector('.name').textContent + ' ' + c.querySelector('.meta').textContent).toLowerCase()
+  document.addEventListener('keydown', (e) => { if (e.key === '/' && document.activeElement !== q) { e.preventDefault(); q.focus() } })
+</script>
+</body>
+</html>
