@@ -35,8 +35,8 @@ Rust API server serves a WebUI and talks to the database.
 
 ```
 sql/00-init.sql         Roles, schema, tables, seed data, RLS policies, auth, grants
-run.sh                  Recreates and starts the demo container (Podman)
-stop.sh                 Removes the demo container
+run.sh                  Recreates the container AND builds + starts the Rust API (idempotent)
+stop.sh                 Stops the API and removes the container
 test.sh                 SQL-level RLS assertions (positive and expected-failure)
 property_test.sh        Property-based security suite (proptest, differential)
 api/                    Rust API server (axum + tokio-postgres) and static/ WebUI
@@ -96,14 +96,16 @@ holes, and the full test matrix. Open it in any browser.
 ## Quick start
 
 ```bash
-./run.sh                          # pull image if needed, start container, wait for init
+./run.sh                          # builds + starts the WHOLE stack: DB container AND Rust API
 ./test.sh                         # SQL-level assertions (expect PASS: 26, FAIL: 0)
-
-cd api && cargo run               # start the API server
-# in another shell:
 ./api_test.sh                     # HTTP-level assertions (expect PASS: 27, FAIL: 0)
 ./property_test.sh                # randomized security properties (576 cases, all held)
 ```
+
+`./run.sh` is **idempotent**: running it again stops the running API and
+container, then rebuilds and restarts everything from a fresh schema. Use
+`./stop.sh` to tear the whole stack down. The API logs to `api/api.log`
+(pid in `api/api.pid`); the WebUI lives at http://127.0.0.1:8081/.
 
 Open **http://127.0.0.1:8081/** for the WebUI (see below).
 
