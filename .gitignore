@@ -7,6 +7,8 @@
 # --- Rust (api/) ---
 # Build output
 **/target/
+# Runtime pidfile written by run.sh / stop.sh (regenerated on every run)
+api/*.pid
 # Cargo.lock is intentionally committed: this is a binary crate, not a library.
 
 # --- Environment / secrets ---
