@@ -40,7 +40,7 @@ stop.sh                 Stops the API and removes the container
 test.sh                 SQL-level RLS assertions (positive and expected-failure)
 property_test.sh        Property-based security suite (proptest, differential)
 api/                    Rust API server (axum + tokio-postgres) and static/ WebUI
-api/env.example         Documented env vars for the API (copy to .env locally)
+api/env.example         Documented env vars for the API (export them in your shell)
 api/properties/         proptest crate: 5 randomized security properties
 api_test.sh             HTTP-level end-to-end assertions against the API
 bench.sh                Benchmark harness: pgbench auth primitives + k6 end-to-end load
@@ -55,8 +55,8 @@ README.md               This file
 Open `api.http` in any JetBrains IDE (HTTP Client is bundled) and press
 **Run All** — the two login requests capture their JWTs into client
 variables, and every request carries inline assertions (the same properties
-as the shell suites). Start the stack first: `./run.sh` then
-`cd api && cargo run`.
+as the shell suites). Start the stack first with `./run.sh` — it
+builds and starts the API as well.
 
 ## Property-based testing
 

@@ -2,7 +2,7 @@
 ### PostgreSQL RLS demo — HTTP Client requests (IntelliJ IDEA)
 ###
 ### How to use:
-###   1. Start the stack:  ./run.sh  &&  cd api && cargo run
+###   1. Start the stack:  ./run.sh   (it also builds and starts the API)
 ###   2. Open this file in IntelliJ IDEA (HTTP Client is bundled).
 ###   3. Run requests in order — or "Run All" from the gutter.
 ###      The two login requests store their tokens into client

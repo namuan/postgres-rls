@@ -3,8 +3,8 @@
 #
 # Proves the authentication flow end to end: login, JWT issuance, tenant
 # isolation through RLS, and policy-driven write rejection.  Requires the
-# demo container (./run.sh) AND the API server (cd api && cargo run).
-# Exits non-zero if any check fails.
+# full stack from ./run.sh (container + API server).  Exits non-zero if any
+# check fails.
 set -uo pipefail
 
 BASE="${BASE:-http://127.0.0.1:8081}"
