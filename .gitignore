@@ -1,0 +1,24 @@
+# --- macOS ---
+.DS_Store
+
+# --- Logs ---
+*.log
+
+# --- Rust (api/) ---
+# Build output
+api/target/
+# Cargo.lock is intentionally committed: this is a binary crate, not a library.
+
+# --- Environment / secrets ---
+# Local overrides for DATABASE_URL / AUDITOR_DATABASE_URL / BIND
+# (see api/env.example — never commit real credentials)
+.env
+.env.*
+
+# --- Editors / IDEs ---
+.idea/
+.vscode/
+*.iml
+
+# --- OS ---
+Thumbs.db

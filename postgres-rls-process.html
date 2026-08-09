@@ -1,0 +1,1382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PostgreSQL RLS — The Whole Process</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* ============ THEME — BLUEPRINT ============ */
+  :root {
+    --font-body: 'DM Sans', system-ui, sans-serif;
+    --font-mono: 'Fira Code', 'SF Mono', Consolas, monospace;
+
+    --bg: #edf2f7;
+    --surface: #ffffff;
+    --surface2: #e2eaf2;
+    --surface3: #d6e2ee;
+    --border: rgba(22, 50, 79, 0.12);
+    --border-bright: rgba(22, 50, 79, 0.24);
+    --text: #1c3547;
+    --text-dim: #5c7387;
+    --grid: rgba(31, 111, 178, 0.08);
+
+    --accent: #1f6fb2;
+    --accent-deep: #174e7d;
+    --accent-dim: rgba(31, 111, 178, 0.09);
+    --ok: #2e7d4f;
+    --ok-dim: rgba(46, 125, 79, 0.1);
+    --bad: #c0392b;
+    --bad-dim: rgba(192, 57, 43, 0.09);
+    --warn: #b07a12;
+    --warn-dim: rgba(176, 122, 18, 0.1);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0a1626;
+      --surface: #102338;
+      --surface2: #0c1d30;
+      --surface3: #16304a;
+      --border: rgba(219, 231, 242, 0.1);
+      --border-bright: rgba(219, 231, 242, 0.22);
+      --text: #dbe7f2;
+      --text-dim: #86a0b8;
+      --grid: rgba(96, 173, 231, 0.07);
+
+      --accent: #54a3dd;
+      --accent-deep: #8fc4ea;
+      --accent-dim: rgba(84, 163, 221, 0.12);
+      --ok: #5cbf84;
+      --ok-dim: rgba(92, 191, 132, 0.12);
+      --bad: #ef7d6f;
+      --bad-dim: rgba(239, 125, 111, 0.12);
+      --warn: #e0b25c;
+      --warn-dim: rgba(224, 178, 92, 0.12);
+    }
+  }
+
+  /* ============ RESET + BASE ============ */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background-color: var(--bg);
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 28px 28px;
+    color: var(--text);
+    font-family: var(--font-body);
+    line-height: 1.6;
+    overflow-wrap: break-word;
+  }
+
+  .wrap {
+    max-width: 1400px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 190px 1fr;
+    gap: 0 44px;
+    padding: 0 24px 80px;
+  }
+  .main { min-width: 0; }
+
+  /* ============ ANIMATION ============ */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes fadeScale {
+    from { opacity: 0; transform: scale(0.94); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  .animate { animation: fadeUp 0.45s cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: calc(var(--i, 0) * 0.06s); }
+  .kpi-card { animation: fadeScale 0.4s cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: calc(var(--i, 0) * 0.07s); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-delay: 0ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  /* ============ TOC ============ */
+  .toc {
+    position: sticky;
+    top: 24px;
+    align-self: start;
+    padding: 14px 0;
+    grid-row: 1 / -1;
+    max-height: calc(100dvh - 48px);
+    overflow-y: auto;
+  }
+  .toc::-webkit-scrollbar { width: 3px; }
+  .toc::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 2px; }
+  .toc-title {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    padding: 0 0 10px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .toc a {
+    display: block;
+    font-size: 11.5px;
+    color: var(--text-dim);
+    text-decoration: none;
+    padding: 4px 8px;
+    border-radius: 4px;
+    border-left: 2px solid transparent;
+    transition: all 0.15s;
+    line-height: 1.4;
+    margin-bottom: 1px;
+  }
+  .toc a:hover { color: var(--text); background: var(--surface2); }
+  .toc a.active { color: var(--text); border-left-color: var(--accent); background: var(--surface); }
+
+  /* ============ HERO ============ */
+  .hero {
+    padding: 56px 0 30px;
+    border-bottom: 3px double var(--border-bright);
+    position: relative;
+    margin-bottom: 36px;
+  }
+  .kicker {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 14px;
+  }
+  .hero h1 {
+    font-size: clamp(34px, 4.6vw, 56px);
+    font-weight: 700;
+    letter-spacing: -1.5px;
+    line-height: 1.02;
+    text-wrap: balance;
+    max-width: 18ch;
+  }
+  .hero h1 em { font-style: italic; color: var(--accent); }
+  .lead {
+    margin-top: 18px;
+    font-size: 17px;
+    line-height: 1.65;
+    color: var(--text-dim);
+    max-width: 72ch;
+  }
+  .lead code, p code, li code, td code {
+    font-family: var(--font-mono);
+    font-size: 0.86em;
+    background: var(--accent-dim);
+    color: var(--accent-deep);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  .stamp {
+    position: absolute;
+    top: 40px;
+    right: 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    border: 2px solid var(--accent);
+    border-radius: 4px;
+    padding: 8px 12px;
+    transform: rotate(3deg);
+    opacity: 0.75;
+    text-align: center;
+    line-height: 1.5;
+  }
+
+  /* KPI row */
+  .kpi-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 14px;
+    margin-top: 34px;
+  }
+  .kpi-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 18px 20px;
+    box-shadow: 0 1px 0 rgba(22, 50, 79, 0.06);
+    border-top: 3px solid var(--accent);
+  }
+  .kpi-card:nth-child(2) { border-top-color: var(--ok); }
+  .kpi-card:nth-child(3) { border-top-color: var(--bad); }
+  .kpi-card:nth-child(4) { border-top-color: var(--warn); }
+  .kpi-card__value {
+    font-size: 34px;
+    font-weight: 700;
+    letter-spacing: -1px;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+  }
+  .kpi-card__label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.4px;
+    color: var(--text-dim);
+    margin-top: 6px;
+  }
+  .kpi-card__sub { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+
+  /* ============ SECTION HEADS ============ */
+  .sec-head {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    margin: 64px 0 22px;
+    padding-top: 20px;
+    border-top: 2px solid var(--text);
+    scroll-margin-top: 20px;
+  }
+  .sec-no {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: 0.08em;
+  }
+  .sec-head h2 { font-size: 24px; font-weight: 700; letter-spacing: -0.4px; }
+  .sec-sub { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1.4px; white-space: nowrap; }
+  .sec-rule { flex: 1; border-bottom: 1px dashed var(--border-bright); min-width: 30px; }
+
+  .subhead {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--accent-deep);
+    margin: 28px 0 6px;
+  }
+  .subhead code { font-size: 0.92em; }
+
+  /* ============ CARDS ============ */
+  .ve-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 18px 22px;
+    position: relative;
+    min-width: 0;
+  }
+  .ve-card--hero {
+    background: color-mix(in srgb, var(--surface) 94%, var(--accent) 6%);
+    border-color: color-mix(in srgb, var(--border) 40%, var(--accent) 60%);
+    box-shadow: 0 3px 12px rgba(22, 50, 79, 0.08);
+  }
+  .ve-card__label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--accent);
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .ve-card__label::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+  }
+  .ve-card h3 { font-size: 16px; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.2px; }
+  .ve-card p, .ve-card li { font-size: 13.5px; color: var(--text-dim); line-height: 1.65; }
+  .ve-card ul { padding-left: 0; list-style: none; margin-top: 8px; }
+  .ve-card li { padding-left: 15px; position: relative; margin-bottom: 5px; }
+  .ve-card li::before { content: '›'; position: absolute; left: 0; color: var(--accent); font-weight: 700; }
+  .ve-card li code { font-size: 0.85em; }
+
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+    margin-top: 18px;
+  }
+  .card-grid > * { min-width: 0; }
+
+  .tier-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1.25fr;
+    gap: 16px;
+    margin-top: 18px;
+    align-items: start;
+  }
+  .tier-grid > * { min-width: 0; overflow-wrap: break-word; }
+
+  /* ============ MERMAID ============ */
+  .mermaid-wrap {
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 32px 24px;
+    overflow: auto;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 420px;
+    margin-top: 18px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .mermaid-wrap--compact { min-height: 280px; }
+  .mermaid-wrap::-webkit-scrollbar { width: 6px; height: 6px; }
+  .mermaid-wrap::-webkit-scrollbar-track { background: transparent; }
+  .mermaid-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  .mermaid-wrap::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+  .mermaid-wrap .mermaid { zoom: 1.2; }
+  .mermaid-wrap { cursor: grab; }
+  .mermaid-wrap.is-panning { cursor: grabbing; user-select: none; }
+
+  .zoom-controls {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: flex;
+    gap: 2px;
+    z-index: 10;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 2px;
+  }
+  .zoom-controls button {
+    width: 28px;
+    height: 28px;
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    font-size: 14px;
+    cursor: pointer;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .zoom-controls button:hover { background: var(--border); color: var(--text); }
+
+  /* Mermaid internals */
+  .mermaid .nodeLabel { font-family: var(--font-body) !important; font-size: 15px !important; }
+  .mermaid .edgeLabel { font-family: var(--font-mono) !important; font-size: 12px !important; }
+  .mermaid .node rect, .mermaid .node circle, .mermaid .node polygon { stroke-width: 1.5px !important; }
+  .mermaid .cluster rect { fill: var(--surface2) !important; stroke: var(--border-bright) !important; stroke-dasharray: 3 3; }
+  .mermaid .cluster-label span { font-family: var(--font-mono) !important; font-size: 11px !important; font-weight: 600 !important; letter-spacing: 1px; }
+  .mermaid .actor { font-family: var(--font-mono) !important; font-size: 12px !important; }
+  .mermaid .messageText { font-family: var(--font-mono) !important; font-size: 12.5px !important; }
+  .mermaid .noteText { font-family: var(--font-body) !important; font-size: 12.5px !important; }
+  .mermaid .labelText { font-family: var(--font-mono) !important; font-size: 12px !important; }
+  .mermaid .loopText, .mermaid .loopText > tspan { font-family: var(--font-mono) !important; font-size: 12px !important; }
+
+  .legend { display: flex; gap: 22px; flex-wrap: wrap; margin-top: 14px; }
+  .legend-item { display: flex; align-items: center; gap: 7px; font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); }
+  .legend-swatch { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+
+  /* ============ CALLOUT ============ */
+  .callout {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 6px 6px 0;
+    padding: 16px 20px;
+    font-size: 13.5px;
+    line-height: 1.65;
+    color: var(--text-dim);
+    margin-top: 20px;
+  }
+  .callout strong { color: var(--text); }
+  .callout--warn { border-left-color: var(--warn); }
+  .callout--bad { border-left-color: var(--bad); }
+  .callout--ok { border-left-color: var(--ok); }
+
+  /* ============ TABLES ============ */
+  .table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-top: 18px;
+  }
+  .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .data-table { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 1.5; }
+  .data-table thead { position: sticky; top: 0; z-index: 2; }
+  .data-table th {
+    background: var(--surface2);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    text-align: left;
+    padding: 11px 16px;
+    border-bottom: 2px solid var(--border-bright);
+    white-space: nowrap;
+  }
+  .data-table td {
+    padding: 11px 16px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+    color: var(--text);
+  }
+  .data-table .wide { min-width: 220px; }
+  .data-table td.num, .data-table th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--font-mono); }
+  .data-table tbody tr:nth-child(even) { background: var(--accent-dim); }
+  .data-table tbody tr:hover { background: var(--border); }
+  .data-table tbody tr:last-child td { border-bottom: none; }
+  .data-table code { font-family: var(--font-mono); font-size: 11px; background: var(--accent-dim); color: var(--accent-deep); padding: 1px 5px; border-radius: 3px; }
+  .data-table small { display: block; color: var(--text-dim); font-size: 11px; margin-top: 2px; }
+  .data-table tfoot td {
+    background: var(--surface2);
+    font-weight: 600;
+    font-size: 12px;
+    border-top: 2px solid var(--border-bright);
+    border-bottom: none;
+    padding: 11px 16px;
+  }
+
+  .status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 500;
+    padding: 2px 9px;
+    border-radius: 5px;
+    white-space: nowrap;
+  }
+  .status--match { background: var(--ok-dim); color: var(--ok); }
+  .status--gap { background: var(--bad-dim); color: var(--bad); }
+  .status--warn { background: var(--warn-dim); color: var(--warn); }
+  .status--info { background: var(--accent-dim); color: var(--accent); }
+
+  /* ============ HOLE CARDS (before/after) ============ */
+  .hole-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 18px; align-items: start; }
+  .hole-grid > * { min-width: 0; overflow-wrap: break-word; }
+  .hole-card { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
+  .hole-card__head {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    padding: 9px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+  }
+  .hole-card__head--trap { background: var(--bad-dim); color: var(--bad); border-bottom: 2px solid var(--bad); }
+  .hole-card__head--fix { background: var(--ok-dim); color: var(--ok); border-bottom: 2px solid var(--ok); }
+  .hole-card__body { padding: 14px 16px; font-size: 13px; line-height: 1.6; color: var(--text-dim); }
+  .hole-card__body code { font-family: var(--font-mono); font-size: 11px; background: var(--border); padding: 1px 5px; border-radius: 3px; color: var(--text); }
+  .hole-card__body strong { color: var(--text); }
+
+  /* ============ CODE + TREE ============ */
+  .code-file { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-top: 18px; }
+  .code-file__header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 16px; background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    font-family: var(--font-mono); font-size: 11.5px; color: var(--text-dim);
+  }
+  .code-file__body {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    line-height: 1.6;
+    padding: 16px;
+    background: var(--surface);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 320px;
+    overflow: auto;
+  }
+  .code-file__body .c { color: var(--text-dim); font-style: italic; }
+  .code-file__body .hl { color: var(--accent); font-weight: 600; }
+
+  .dir-tree {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    line-height: 1.75;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 18px 22px;
+    overflow-x: auto;
+    white-space: pre;
+    margin-top: 18px;
+  }
+  .dir-tree .ann { color: var(--text-dim); font-size: 11px; font-style: italic; }
+  .dir-tree .hl { color: var(--accent); font-weight: 600; }
+
+  /* ============ RESPONSIVE ============ */
+  @media (max-width: 1000px) {
+    .wrap { grid-template-columns: 1fr; padding: 0 16px 60px; }
+    .toc {
+      position: sticky;
+      top: 0;
+      z-index: 200;
+      max-height: none;
+      display: flex;
+      gap: 4px;
+      align-items: center;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 0;
+      margin: 0 -16px;
+      padding-left: 16px;
+      padding-right: 16px;
+      grid-row: auto;
+    }
+    .toc::-webkit-scrollbar { display: none; }
+    .toc-title { display: none; }
+    .toc a {
+      white-space: nowrap;
+      flex-shrink: 0;
+      border-left: none;
+      border-bottom: 2px solid transparent;
+      border-radius: 4px 4px 0 0;
+      padding: 6px 10px;
+      font-size: 10.5px;
+    }
+    .toc a.active { border-left: none; border-bottom-color: var(--accent); background: var(--surface); }
+    .main { padding-top: 16px; }
+    .sec-head { scroll-margin-top: 56px; }
+    .tier-grid { grid-template-columns: 1fr; }
+    .hole-grid { grid-template-columns: 1fr; }
+    .stamp { position: static; display: inline-block; margin-top: 16px; transform: rotate(2deg); }
+    .hero { padding-top: 36px; }
+    .sec-sub { white-space: normal; }
+  }
+
+  @media (max-width: 640px) {
+    .mermaid-wrap { padding: 16px 10px; }
+    .hero h1 { font-size: 32px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <nav class="toc" id="toc">
+    <div class="toc-title">Contents</div>
+    <a href="#s1">1 · System overview</a>
+    <a href="#s2">2 · The trust boundary</a>
+    <a href="#s3">3 · Inside PostgreSQL</a>
+    <a href="#s4">4 · User journeys</a>
+    <a href="#s5">5 · The closed holes</a>
+    <a href="#s6">6 · Test coverage</a>
+    <a href="#s7">7 · Files &amp; runbook</a>
+  </nav>
+
+  <div class="main">
+
+    <!-- ================= HERO ================= -->
+    <header class="hero animate" style="--i:0">
+      <p class="kicker">PostgreSQL 16 · Podman · Rust/Axum — Field Report</p>
+      <h1>Row Level Security:<br>the <em>whole process</em></h1>
+      <div class="stamp">SHEET 1/1<br>REV 3 — HARDENED</div>
+      <p class="lead">
+        One table, <code>app.documents</code>, holds rows for two tenants. A Rust API server and a
+        browser WebUI sit in front of it, and PostgreSQL itself decides who may see which rows —
+        using policies that trust <em>nothing</em> the client says. This page walks the entire
+        pipeline: every function, every policy, every HTTP round-trip, and three plotted user
+        journeys (two tenants, one attacker).
+      </p>
+      <div class="kpi-row">
+        <div class="kpi-card" style="--i:0"><div class="kpi-card__value">26</div><div class="kpi-card__label">SQL assertions</div><div class="kpi-card__sub">test.sh — all green</div></div>
+        <div class="kpi-card" style="--i:1"><div class="kpi-card__value">27</div><div class="kpi-card__label">HTTP assertions</div><div class="kpi-card__sub">api_test.sh — all green</div></div>
+        <div class="kpi-card" style="--i:2"><div class="kpi-card__value">0</div><div class="kpi-card__label">Secrets in the API</div><div class="kpi-card__sub">HMAC key lives only in the DB</div></div>
+        <div class="kpi-card" style="--i:3"><div class="kpi-card__value">3</div><div class="kpi-card__label">Security roles</div><div class="kpi-card__sub">migration · app · auditor</div></div>
+      </div>
+    </header>
+
+    <!-- ================= 1 · SYSTEM ================= -->
+    <div class="sec-head" id="s1"><span class="sec-no">01</span><h2>System overview</h2><span class="sec-sub">three tiers, one boundary</span><span class="sec-rule"></span></div>
+
+    <div class="mermaid-wrap animate" style="--i:0">
+      <div class="zoom-controls">
+        <button onclick="zoomDiagram(this, 1.2)" title="Zoom in">+</button>
+        <button onclick="zoomDiagram(this, 0.8)" title="Zoom out">&minus;</button>
+        <button onclick="resetZoom(this)" title="Reset zoom">&#8634;</button>
+        <button onclick="openDiagramFullscreen(this)" title="Open full size in new tab">&#x26F6;</button>
+      </div>
+      <pre class="mermaid">
+graph TD
+  subgraph T1["TIER 1 — BROWSER"]
+    UI["Tenancy Ledger WebUI<br/>api/static/index.html<br/>vanilla JS · token in sessionStorage"]
+  end
+  subgraph T2["TIER 2 — RUST API · axum, port 8081"]
+    H["handlers<br/>/login · /me · /documents<br/>/demo/truth · static /"]
+    P1["pool — app_user<br/>deadpool-postgres"]
+    P2["pool — postgres superuser<br/>teacher mode, demo-only"]
+  end
+  subgraph T3["TIER 3 — POSTGRESQL 16 · podman, port 54329"]
+    SEC[("app.jwt_secret<br/>HMAC secret — the only secret")]
+    FNS["SECURITY DEFINER<br/>login · session_verify<br/>session_claim"]
+    DOCS[("app.documents<br/>RLS + FORCE RLS<br/>2 policies")]
+  end
+  UI -->|"HTTP · Bearer JWT"| H
+  H --> P1
+  H --> P2
+  P1 --> FNS
+  FNS --> SEC
+  P1 --> DOCS
+  P2 -.->|"unfiltered read (superuser)"| DOCS
+      </pre>
+    </div>
+
+    <div class="legend animate" style="--i:1">
+      <div class="legend-item"><div class="legend-swatch" style="background:var(--accent)"></div> trusted path (app_user)</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:var(--warn)"></div> demo-only teacher path (superuser)</div>
+    </div>
+
+    <div class="tier-grid">
+      <div class="ve-card animate" style="--i:2">
+        <div class="ve-card__label">Tier 1 — Browser</div>
+        <h3>The WebUI</h3>
+        <ul>
+          <li>Single <code>index.html</code> served by the same axum server (<code>ServeDir</code> fallback)</li>
+          <li>One-click demo identities: Alice (tenant A) / Bob (tenant B)</li>
+          <li>Ledger table + <b>redacted bars</b> for rows RLS hides (teacher mode)</li>
+          <li>Request journal showing every HTTP status, incl. 403s</li>
+        </ul>
+      </div>
+      <div class="ve-card animate" style="--i:3">
+        <div class="ve-card__label">Tier 2 — Rust API</div>
+        <h3>rls-api (axum 0.8)</h3>
+        <ul>
+          <li>Two pools: <code>app_user</code> (real work) and superuser (teacher endpoint)</li>
+          <li>Every request: one transaction → <code>app.session_verify()</code> → query → commit</li>
+          <li>Holds <b>no secret</b>: no JWT lib, no key material, no minting</li>
+          <li>RLS rejections (SQLSTATE 42501) mapped to HTTP 403</li>
+        </ul>
+      </div>
+      <div class="ve-card ve-card--hero animate" style="--i:4">
+        <div class="ve-card__label">Tier 3 — PostgreSQL</div>
+        <h3>The enforcement point</h3>
+        <ul>
+          <li>Policies read <code>app.session_claim('tenant_id')</code> — a claim that is <b>re-verified against the HMAC signature on every row evaluation</b></li>
+          <li>Tokens minted (<code>app.login</code>) and verified (<code>app.session_verify</code>) by SECURITY DEFINER functions; key in <code>app.jwt_secret</code></li>
+          <li>RLS enabled <b>and</b> forced; owner is a NOLOGIN migration role</li>
+          <li>Podman container, no volume → every <code>./run.sh</code> rebuilds schema from <code>sql/00-init.sql</code></li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- ================= 2 · TRUST BOUNDARY ================= -->
+    <div class="sec-head" id="s2"><span class="sec-no">02</span><h2>The trust boundary</h2><span class="sec-sub">mint + verify, both in the database</span><span class="sec-rule"></span></div>
+
+    <p class="lead animate" style="--i:0">
+      The core decision: <b>the tenant id is never a session variable the client can set — it is a
+      signed claim that PostgreSQL itself mints and re-verifies.</b> The API cannot mint tokens
+      (it has no secret), and a direct SQL user cannot forge one (HMAC). Two sequences make this
+      concrete.
+    </p>
+
+    <h3 class="subhead animate" style="--i:1">2.1 — Login: the database mints the token</h3>
+    <div class="mermaid-wrap mermaid-wrap--compact animate" style="--i:2">
+      <div class="zoom-controls">
+        <button onclick="zoomDiagram(this, 1.2)" title="Zoom in">+</button>
+        <button onclick="zoomDiagram(this, 0.8)" title="Zoom out">&minus;</button>
+        <button onclick="resetZoom(this)" title="Reset zoom">&#8634;</button>
+        <button onclick="openDiagramFullscreen(this)" title="Open full size in new tab">&#x26F6;</button>
+      </div>
+      <pre class="mermaid">
+sequenceDiagram
+  actor U as User — browser
+  participant API as Rust API
+  participant PG as PostgreSQL
+  U->>API: POST /login {email, password}
+  API->>PG: SELECT * FROM app.login($1, $2)
+  Note over PG: bcrypt verify — pgcrypto crypt(), cost 10<br/>mint JWT: HMAC-SHA256, key from app.jwt_secret
+  PG-->>API: token, user_id, tenant_id, display_name, expires_in
+  API-->>U: 200 {token, token_type: Bearer, ...}
+      </pre>
+    </div>
+
+    <h3 class="subhead animate" style="--i:0">2.2 — Every request: the database re-verifies</h3>
+    <div class="mermaid-wrap animate" style="--i:1">
+      <div class="zoom-controls">
+        <button onclick="zoomDiagram(this, 1.2)" title="Zoom in">+</button>
+        <button onclick="zoomDiagram(this, 0.8)" title="Zoom out">&minus;</button>
+        <button onclick="resetZoom(this)" title="Reset zoom">&#8634;</button>
+        <button onclick="openDiagramFullscreen(this)" title="Open full size in new tab">&#x26F6;</button>
+      </div>
+      <pre class="mermaid">
+sequenceDiagram
+  actor U as User — browser
+  participant API as Rust API
+  participant PG as PostgreSQL
+  U->>API: GET /documents — Authorization: Bearer &lt;token&gt;
+  API->>PG: BEGIN
+  API->>PG: SELECT * FROM app.session_verify($token)
+  Note over PG: HMAC signature + expiry check<br/>set_config('app.jwt', token, true) — transaction-local
+  PG-->>API: claims — or zero rows → HTTP 401
+  API->>PG: SELECT id, title, ... FROM app.documents
+  Note over PG: policy: tenant_id = app.session_claim('tenant_id')::uuid<br/>signature re-verified per row — forged GUC → NULL → deny
+  PG-->>API: only this tenant's published rows
+  API-->>U: 200 {count, documents}
+      </pre>
+    </div>
+
+    <div class="callout animate" style="--i:2">
+      <strong>Why the GUC is safe.</strong> <code>app.session_verify</code> stores the token in the session
+      setting <code>app.jwt</code>. Anyone can <code>SET</code> that setting — but the policies never read it
+      directly. They call <code>app.session_claim()</code>, which takes whatever is in the setting,
+      recomputes the HMAC against the DB-held key, checks expiry, and only then returns the claim.
+      A hand-written or forged value yields <code>NULL</code> → the row is denied. The setting is
+      transaction-local (<code>set_config(..., true)</code>), so pooled connections never leak a
+      session between requests.
+    </div>
+
+    <div class="card-grid animate" style="--i:3">
+      <div class="ve-card">
+        <div class="ve-card__label">app.login(email, password)</div>
+        <h3>Mint — plpgsql, SECURITY DEFINER</h3>
+        <ul>
+          <li>Looks up <code>app.users</code> where <code>password_hash = crypt($2, password_hash)</code> — the hash never leaves the DB</li>
+          <li>Builds JWT: <code>base64url(header).base64url(claims).HMAC-SHA256</code></li>
+          <li>Claims: <code>sub</code>, <code>tenant_id</code>, <code>display_name</code>, <code>iat</code>, <code>exp</code> (24 h)</li>
+          <li>Returns zero rows on bad credentials — no error, no oracle</li>
+          <li><code>search_path = pg_temp</code>, all references qualified</li>
+        </ul>
+      </div>
+      <div class="ve-card">
+        <div class="ve-card__label">app.session_verify(token)</div>
+        <h3>Verify — plpgsql, SECURITY DEFINER</h3>
+        <ul>
+          <li>Splits on <code>.</code>, demands exactly 3 parts</li>
+          <li>Recomputes HMAC over <code>header.payload</code>, constant comparison with the supplied signature</li>
+          <li>Checks <code>exp</code> and required claims; zero rows if anything fails</li>
+          <li>On success: <code>set_config('app.jwt', token, true)</code> → installs the verified session</li>
+        </ul>
+      </div>
+      <div class="ve-card">
+        <div class="ve-card__label">app.session_claim(name)</div>
+        <h3>Policy read — STABLE, SECURITY DEFINER</h3>
+        <ul>
+          <li>The only function policies may trust: called per row, re-verifies the GUC's signature and expiry</li>
+          <li>Returns <code>payload -&gt;&gt; name</code> or <code>NULL</code> (never raises)</li>
+          <li>Policy: <code>tenant_id = app.session_claim('tenant_id')::uuid</code></li>
+          <li><code>app.establish()</code> = login + verify in one call (tests, convenience)</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="code-file animate" style="--i:4">
+      <div class="code-file__header">token anatomy — what the browser holds</div>
+      <pre class="code-file__body"><code><span class="c"># header.payload.signature — signed by PostgreSQL, readable by anyone, forgeable by no one</span>
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9
+.
+eyJzdWIiOiIxIiwidGVuYW50X2lkIjoiMTExMTExMTEtMTExMS0xMTExLTExMTEtMTExMTExMTExMTExIiwiaWF0IjoxNzg2MjYyNzI5LCJleHAiOjE3ODYzNDkxMjl9
+.
+<span class="hl">vUnuasvhuzWrbqluBi-9eEJMALjKKVJjIgfJ6sCaFYU</span>
+
+<span class="c"># decoded payload:</span>
+{ "sub": "1",
+  "tenant_id": "11111111-1111-1111-1111-111111111111",   <span class="c">← sealed at mint time, from app.users</span>
+  "display_name": "Alice (Tenant A)",
+  "iat": 1786262729, "exp": 1786349129 }                  <span class="c">← 24h TTL</span></code></pre>
+    </div>
+
+    <div class="callout callout--warn animate" style="--i:5">
+      <strong>War story.</strong> PostgreSQL's <code>encode(data,'base64')</code> wraps output in
+      newlines every 76 characters (MIME style). The first version of <code>app.url_encode()</code>
+      produced tokens with embedded <code>\n</code> — the DB refused to decode them
+      (<code>invalid base64 end sequence</code>) and HTTP headers would have rejected them too.
+      Fix: strip <code>\r\n</code> before the URL-safe translate. Every layer of this system got
+      tested into working.
+    </div>
+
+    <!-- ================= 3 · INSIDE POSTGRES ================= -->
+    <div class="sec-head" id="s3"><span class="sec-no">03</span><h2>Inside PostgreSQL</h2><span class="sec-sub">roles · policies · objects</span><span class="sec-rule"></span></div>
+
+    <h3 class="subhead animate" style="--i:0">Roles — ownership is for migrations, not for the app</h3>
+    <div class="table-wrap animate" style="--i:1">
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead><tr><th>Role</th><th>Attributes</th><th class="wide">Job</th><th>Can it see rows it shouldn't?</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><code>migration_runner</code></td><td><code>NOLOGIN</code>, no <code>BYPASSRLS</code></td>
+              <td class="wide">Owns the <code>app</code> schema, all tables, policies and SECURITY DEFINER functions. Used only for DDL (init scripts, migrations). <b>No runtime principal.</b></td>
+              <td><span class="status status--info">no — FORCE RLS applies to it too</span></td>
+            </tr>
+            <tr>
+              <td><code>app_user</code></td><td><code>LOGIN</code>, password, no <code>BYPASSRLS</code></td>
+              <td class="wide">The API server's only login: DML on <code>app.documents</code>, EXECUTE on the auth functions. No ownership, no <code>CREATE</code> on the schema.</td>
+              <td><span class="status status--info">no — RLS filters everything</span></td>
+            </tr>
+            <tr>
+              <td><code>rls_auditor</code></td><td><code>NOLOGIN</code>, <code>BYPASSRLS</code></td>
+              <td class="wide">Exists to demonstrate why <code>BYPASSRLS</code> is dangerous — and to own the "leaky" demo view (§5).</td>
+              <td><span class="status status--gap">yes — by design (demo only)</span></td>
+            </tr>
+            <tr>
+              <td><code>postgres</code></td><td>superuser</td>
+              <td class="wide">Bootstrap, the SQL test suite, and the teacher-mode endpoint pool.</td>
+              <td><span class="status status--gap">yes — always exempt</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <h3 class="subhead animate" style="--i:0">Policies on <code>app.documents</code> — RLS enabled <b>and</b> forced</h3>
+    <div class="table-wrap animate" style="--i:1">
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead><tr><th>Policy</th><th>Kind</th><th class="wide">Expression</th><th>Effect</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><code>tenant_isolation</code></td><td>permissive</td>
+              <td class="wide"><code>USING</code> + <code>WITH CHECK</code>:<br><code>tenant_id = app.session_claim('tenant_id')::uuid</code></td>
+              <td>Row visible/insertable only if it belongs to the <b>verified</b> tenant. Permissive policies OR together.</td>
+            </tr>
+            <tr>
+              <td><code>published_only</code></td><td>restrictive</td>
+              <td class="wide"><code>USING (published)</code> + <code>WITH CHECK (published)</code></td>
+              <td>Unpublished drafts invisible <b>even to their own tenant</b>, and un-insertable. Restrictive policies AND with the permissive set.</td>
+            </tr>
+          </tbody>
+          <tfoot><tr><td colspan="4"><code>ALTER TABLE app.documents FORCE ROW LEVEL SECURITY;</code> — policies apply to the table owner too (the migration role); without FORCE, owners bypass RLS by default (proven by <code>owner_bypass_probe</code>).</td></tr></tfoot>
+        </table>
+      </div>
+    </div>
+
+    <h3 class="subhead animate" style="--i:0">Object inventory</h3>
+    <div class="card-grid animate" style="--i:1">
+      <div class="ve-card">
+        <div class="ve-card__label">app.documents</div>
+        <ul>
+          <li>7 seeded rows: 4 tenant A (3 published, 1 draft), 3 tenant B (2 published, 1 draft)</li>
+          <li>RLS + FORCE; the two policies above</li>
+        </ul>
+      </div>
+      <div class="ve-card">
+        <div class="ve-card__label">app.users</div>
+        <ul>
+          <li>alice@alpha.example → tenant A, bob@beta.example → tenant B</li>
+          <li>bcrypt hashes (cost 10); no role ever SELECTs this table directly</li>
+        </ul>
+      </div>
+      <div class="ve-card">
+        <div class="ve-card__label">app.jwt_secret</div>
+        <ul>
+          <li>Single row, <code>CHECK (id = 1)</code>; read only inside the SECURITY DEFINER functions</li>
+          <li>Demo value; rotate via migration in production</li>
+        </ul>
+      </div>
+      <div class="ve-card">
+        <div class="ve-card__label">app.secret_notes</div>
+        <ul>
+          <li>Leak-demonstration table: policy function <code>RAISE</code>s for restricted rows (§5)</li>
+        </ul>
+      </div>
+      <div class="ve-card">
+        <div class="ve-card__label">app.owner_bypass_probe</div>
+        <ul>
+          <li>RLS enabled but <b>not</b> forced + <code>USING (false)</code> deny policy: proves the owner-exemption default</li>
+        </ul>
+      </div>
+      <div class="ve-card">
+        <div class="ve-card__label">app.v_documents_*</div>
+        <ul>
+          <li><code>v_documents_safe</code>: <code>security_invoker = true</code></li>
+          <li><code>v_documents_leaky</code>: owned by the <code>BYPASSRLS</code> auditor — the trap (§5)</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- ================= 4 · USER JOURNEYS ================= -->
+    <div class="sec-head" id="s4"><span class="sec-no">04</span><h2>User journeys</h2><span class="sec-sub">two tenants, one attacker — plotted</span><span class="sec-rule"></span></div>
+
+    <h3 class="subhead animate" style="--i:0">Journey 1 — Alice: read, write, and a rejected draft</h3>
+    <div class="mermaid-wrap animate" style="--i:1">
+      <div class="zoom-controls">
+        <button onclick="zoomDiagram(this, 1.2)" title="Zoom in">+</button>
+        <button onclick="zoomDiagram(this, 0.8)" title="Zoom out">&minus;</button>
+        <button onclick="resetZoom(this)" title="Reset zoom">&#8634;</button>
+        <button onclick="openDiagramFullscreen(this)" title="Open full size in new tab">&#x26F6;</button>
+      </div>
+      <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  actor A as Alice — tenant A
+  participant UI as WebUI
+  participant API as Rust API
+  participant DB as PostgreSQL
+  A->>UI: one-click "Alice — tenant A"
+  UI->>API: POST /login (alice-password)
+  API->>DB: app.login — bcrypt + mint
+  DB-->>API: token, tenant A sealed in claims
+  API-->>UI: 200
+  UI->>API: GET /documents
+  API->>DB: session_verify + SELECT
+  DB-->>API: 3 rows — Roadmap, Budget, Hiring
+  UI-->>A: 3 visible · 4 redacted bars
+  A->>UI: compose "Alpha Retro" → Post
+  UI->>API: POST /documents (published)
+  API->>DB: session_verify + INSERT
+  DB-->>API: 201 created
+  UI-->>A: now 4 visible
+  A->>UI: compose draft, published = OFF
+  UI->>API: POST /documents {published: false}
+  API->>DB: INSERT — WITH CHECK violation
+  DB-->>API: SQLSTATE 42501
+  API-->>UI: 403 — policy rejected this write
+  UI-->>A: REJECTED stamp in the journal
+      </pre>
+    </div>
+
+    <h3 class="subhead animate" style="--i:0">Journey 2 — Bob: same table, different reality</h3>
+    <div class="mermaid-wrap mermaid-wrap--compact animate" style="--i:1">
+      <div class="zoom-controls">
+        <button onclick="zoomDiagram(this, 1.2)" title="Zoom in">+</button>
+        <button onclick="zoomDiagram(this, 0.8)" title="Zoom out">&minus;</button>
+        <button onclick="resetZoom(this)" title="Reset zoom">&#8634;</button>
+        <button onclick="openDiagramFullscreen(this)" title="Open full size in new tab">&#x26F6;</button>
+      </div>
+      <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  actor B as Bob — tenant B
+  participant UI as WebUI
+  participant API as Rust API
+  participant DB as PostgreSQL
+  B->>UI: one-click "Bob — tenant B"
+  UI->>API: POST /login (bob-password)
+  API->>DB: app.login — mint
+  DB-->>API: token, tenant B sealed in claims
+  API-->>UI: 200
+  UI->>API: GET /documents
+  API->>DB: session_verify + SELECT
+  DB-->>API: 2 rows — Launch, Metrics
+  UI-->>B: 2 visible · 6 redacted bars
+  Note over UI: Alice's "Alpha Retro" is in the<br/>same table — invisible from here.<br/>The claim, not the query, decides.
+      </pre>
+    </div>
+
+    <h3 class="subhead animate" style="--i:0">Journey 3 — Mallory: every attack path dies in the database</h3>
+    <div class="mermaid-wrap animate" style="--i:1">
+      <div class="zoom-controls">
+        <button onclick="zoomDiagram(this, 1.2)" title="Zoom in">+</button>
+        <button onclick="zoomDiagram(this, 0.8)" title="Zoom out">&minus;</button>
+        <button onclick="resetZoom(this)" title="Reset zoom">&#8634;</button>
+        <button onclick="openDiagramFullscreen(this)" title="Open full size in new tab">&#x26F6;</button>
+      </div>
+      <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  actor M as Mallory — stolen app_user DB credentials
+  participant DB as PostgreSQL — direct psql
+  M->>DB: SET app.tenant_id = '11111111-...'
+  DB-->>M: ok — but the policies ignore it
+  M->>DB: SELECT * FROM app.documents
+  DB-->>M: 0 rows — session_claim returns NULL
+  M->>DB: SELECT * FROM app.session_verify('forged.token.here')
+  DB-->>M: 0 rows — HMAC mismatch
+  M->>DB: app.login('alice@alpha.example', 'guess')
+  DB-->>M: 0 rows — bcrypt rejects
+  M->>DB: DROP TABLE app.documents
+  DB-->>M: permission denied — no ownership, no DDL
+  Note over M,DB: no path to tenant A's rows: claims are<br/>minted and verified only inside PostgreSQL,<br/>and the app role owns nothing.
+      </pre>
+    </div>
+
+    <div class="callout callout--ok animate" style="--i:2">
+      <strong>Even the API can't cheat.</strong> The Rust server holds no secret and owns nothing.
+      A compromised API can only act as <code>app_user</code> — and that role cannot mint tokens for
+      tenants whose passwords it doesn't know. This is the point of moving the secret into the
+      database: the trust anchor is the password check, not a file on the API host.
+    </div>
+
+    <!-- ================= 5 · CLOSED HOLES ================= -->
+    <div class="sec-head" id="s5"><span class="sec-no">05</span><h2>The closed holes</h2><span class="sec-sub">four classic RLS traps — trap vs fix</span><span class="sec-rule"></span></div>
+
+    <div class="hole-grid">
+      <div class="hole-card animate" style="--i:0">
+        <div class="hole-card__head hole-card__head--trap">Hole 1 — the settable tenant</div>
+        <div class="hole-card__body">
+          Classic RLS demos read <code>current_setting('app.tenant_id')</code> in the policy. Anyone
+          with <code>app_user</code> credentials runs <code>SET app.tenant_id = '&lt;any tenant&gt;'</code>
+          and reads everyone's rows.
+        </div>
+      </div>
+      <div class="hole-card animate" style="--i:1">
+        <div class="hole-card__head hole-card__head--fix">Fix — verified claims</div>
+        <div class="hole-card__body">
+          Policies call <code>app.session_claim('tenant_id')</code>, which <strong>re-verifies the HMAC
+          signature of whatever sits in the session GUC</strong>. Raw <code>SET</code>, forged or expired
+          tokens → <code>NULL</code> → default deny. <em>Proof:</em> <code>test.sh</code> §2 —
+          <code>set_config</code> now returns 0 rows.
+        </div>
+      </div>
+
+      <div class="hole-card animate" style="--i:2">
+        <div class="hole-card__head hole-card__head--trap">Hole 2 — the owning principal</div>
+        <div class="hole-card__body">
+          The app role owns the tables → it can <code>ALTER POLICY</code>, <code>DROP TABLE</code>, or
+          <code>DISABLE ROW LEVEL SECURITY</code> whenever it wants.
+        </div>
+      </div>
+      <div class="hole-card animate" style="--i:3">
+        <div class="hole-card__head hole-card__head--fix">Fix — DDL-only migration role</div>
+        <div class="hole-card__body">
+          <code>migration_runner</code> (NOLOGIN) owns schema, tables, policies, functions. The app
+          role has DML + EXECUTE only, no <code>CREATE</code> on the schema. <em>Proof:</em>
+          <code>test.sh</code> §11 — <code>ALTER POLICY</code> / <code>DROP</code> / <code>CREATE</code>
+          all fail for <code>app_user</code>.
+        </div>
+      </div>
+
+      <div class="hole-card animate" style="--i:4">
+        <div class="hole-card__head hole-card__head--trap">Hole 3 — leaky views</div>
+        <div class="hole-card__body">
+          A view over an RLS table runs as its <em>owner</em>. If the owner is privileged, RLS is
+          bypassed underneath and the view leaks everything to anyone with <code>SELECT</code>.
+        </div>
+      </div>
+      <div class="hole-card animate" style="--i:5">
+        <div class="hole-card__head hole-card__head--fix">Fix — demonstrated both ways</div>
+        <div class="hole-card__body">
+          <code>app.v_documents_safe</code> uses <code>security_invoker = true</code> → invoker's RLS
+          applies (3 rows). <code>app.v_documents_leaky</code>, owned by the <code>BYPASSRLS</code>
+          auditor, exposes all 7. <em>Proof:</em> <code>test.sh</code> §12. Rule: RLS views must be
+          <code>security_invoker</code>, and privileged roles must never own queryable objects.
+        </div>
+      </div>
+
+      <div class="hole-card animate" style="--i:6">
+        <div class="hole-card__head hole-card__head--trap">Hole 4 — leaking policy functions</div>
+        <div class="hole-card__body">
+          Policies are evaluated on rows the user will never see. A function that <code>RAISE</code>s
+          or branches on hidden data leaks existence through errors and timing.
+        </div>
+      </div>
+      <div class="hole-card animate" style="--i:7">
+        <div class="hole-card__head hole-card__head--fix">Fix — demonstrated, then avoided</div>
+        <div class="hole-card__body">
+          <code>app.secret_notes</code> ships a deliberately leaky policy (<code>RAISE</code> on
+          restricted rows): a sessionless scan <strong>errors</strong>, proving the leak —
+          <code>test.sh</code> §13. The real policies avoid functions entirely: plain column
+          comparisons. Never <code>LEAKPROOF</code>, never volatile, never side-effecting.
+        </div>
+      </div>
+    </div>
+
+    <div class="callout callout--warn animate" style="--i:8">
+      <strong>By design, not closable:</strong> superusers and <code>BYPASSRLS</code> roles always
+      bypass RLS. The countermeasure is containment — nobody at runtime holds those attributes
+      (<code>rls_auditor</code> is NOLOGIN and exists only for the demo; the single superuser
+      connection is the demo-only teacher endpoint).
+    </div>
+
+    <!-- ================= 6 · TEST COVERAGE ================= -->
+    <div class="sec-head" id="s6"><span class="sec-no">06</span><h2>Test coverage</h2><span class="sec-sub">53 assertions, all green</span><span class="sec-rule"></span></div>
+
+    <h3 class="subhead animate" style="--i:0">test.sh — 26 SQL-level assertions</h3>
+    <div class="table-wrap animate" style="--i:1">
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead><tr><th>§</th><th>Group</th><th class="wide">What is proven</th><th class="num">Checks</th><th>Result</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>Default deny</td><td class="wide">No verified session → <code>count(*) = 0</code></td><td class="num">1</td><td><span class="status status--match">PASS</span></td></tr>
+            <tr><td>2</td><td>The hole, closed</td><td class="wide"><code>set_config('app.tenant_id',…)</code> grants nothing; wrong-password and garbage tokens establish nothing</td><td class="num">3</td><td><span class="status status--match">PASS</span></td></tr>
+            <tr><td>3</td><td>Tenant isolation</td><td class="wide">Alice sees 3 / Bob sees 2 / zero cross-tenant rows via <code>app.establish()</code></td><td class="num">3</td><td><span class="status status--match">PASS</span></td></tr>
+            <tr><td>4</td><td>Restrictive policy</td><td class="wide">Unpublished draft hidden even from its own tenant</td><td class="num">1</td><td><span class="status status--match">PASS</span></td></tr>
+            <tr><td>5</td><td>WITH CHECK</td><td class="wide">Cross-tenant INSERT, tenant reassignment, unpublished INSERT — all rejected</td><td class="num">3</td><td><span class="status status--match">PASS</span></td></tr>
+            <tr><td>6</td><td>Positive controls</td><td class="wide">In-tenant UPDATE / INSERT succeed — denials are policy-driven, not privilege-driven</td><td class="num">2</td><td><span class="status status--match">PASS</span></td></tr>
+            <tr><td>7–8</td><td>FORCE RLS / owner</td><td class="wide">Owner sees 0 rows on <code>app.documents</code> (FORCE) but 2 on the probe (no FORCE)</td><td class="num">3</td><td><span class="status status--match">PASS</span></td></tr>
+            <tr><td>9–10</td><td>Exempt roles</td><td class="wide"><code>rls_auditor</code> (BYPASSRLS) and superuser see all 7</td><td class="num">2</td><td><span class="status status--match">PASS</span></td></tr>
+            <tr><td>11</td><td>No DDL for the app</td><td class="wide"><code>ALTER POLICY</code>, <code>DROP TABLE</code>, <code>CREATE TABLE</code> all denied; migration role can still alter (positive control)</td><td class="num">4</td><td><span class="status status--match">PASS</span></td></tr>
+            <tr><td>12</td><td>Views</td><td class="wide"><code>security_invoker</code> view → 3 rows; BYPASSRLS-owned view → 7 (leak)</td><td class="num">2</td><td><span class="status status--match">PASS</span></td></tr>
+            <tr><td>13</td><td>Leaky policy fn</td><td class="wide">RAISE-based policy errors without a session; reads fine with one</td><td class="num">2</td><td><span class="status status--match">PASS</span></td></tr>
+          </tbody>
+          <tfoot><tr><td colspan="3">Total</td><td class="num">26</td><td><span class="status status--match">26 / 26</span></td></tr></tfoot>
+        </table>
+      </div>
+    </div>
+
+    <h3 class="subhead animate" style="--i:0">api_test.sh — 27 HTTP-level assertions</h3>
+    <div class="table-wrap animate" style="--i:1">
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead><tr><th>Group</th><th class="wide">What is proven</th><th class="num">Checks</th><th>Result</th></tr></thead>
+          <tbody>
+            <tr><td>Health</td><td class="wide"><code>GET /health</code> → 200</td><td class="num">1</td><td><span class="status status--match">PASS</span></td></tr>
+            <tr><td>WebUI</td><td class="wide">Index served at <code>/</code>; teacher endpoint requires a session (401)</td><td class="num">3</td><td><span class="status status--match">PASS</span></td></tr>
+            <tr><td>Login</td><td class="wide">Alice/Bob 200 with correct tenant claim; wrong password 401; unknown user 401</td><td class="num">7</td><td><span class="status status--match">PASS</span></td></tr>
+            <tr><td>Authorization</td><td class="wide">No token 401; tampered token 401; <code>/me</code> returns the DB-verified identity</td><td class="num">4</td><td><span class="status status--match">PASS</span></td></tr>
+            <tr><td>Isolation</td><td class="wide">Alice 3 docs with correct titles; Bob 2; teacher view shows 7</td><td class="num">5</td><td><span class="status status--match">PASS</span></td></tr>
+            <tr><td>Writes</td><td class="wide">Create 201; owner is the token's tenant; counts update; Bob never sees them; <code>published:false</code> → 403; teacher sees the new rows</td><td class="num">7</td><td><span class="status status--match">PASS</span></td></tr>
+          </tbody>
+          <tfoot><tr><td>Total</td><td></td><td class="num">27</td><td><span class="status status--match">27 / 27</span></td></tr></tfoot>
+        </table>
+      </div>
+    </div>
+
+    <!-- ================= 7 · FILES & RUNBOOK ================= -->
+    <div class="sec-head" id="s7"><span class="sec-no">07</span><h2>Files &amp; runbook</h2><span class="sec-sub">reproduce everything</span><span class="sec-rule"></span></div>
+
+    <pre class="dir-tree animate" style="--i:0">postgres-rls/
+├── <span class="hl">sql/00-init.sql</span>   <span class="ann">— roles, schema, seed, policies, auth functions, grants (10 sections)</span>
+├── <span class="hl">run.sh</span>           <span class="ann">— podman: pull postgres:16, recreate container, mount sql/ read-only, wait for init</span>
+├── <span class="hl">stop.sh</span>          <span class="ann">— remove the container (no volume → next run re-runs init)</span>
+├── <span class="hl">test.sh</span>         <span class="ann">— 26 SQL assertions (psql as app_user / postgres + SET ROLE)</span>
+├── <span class="hl">api_test.sh</span>     <span class="ann">— 27 HTTP assertions (curl + jq against the running API)</span>
+├── <span class="hl">api/</span>
+│   ├── <span class="hl">Cargo.toml</span>     <span class="ann">— axum 0.8 · tokio-postgres · deadpool · tower-http · uuid</span>
+│   ├── <span class="hl">src/main.rs</span>   <span class="ann">— 5 handlers + static fallback; no JWT crate, no secret</span>
+│   └── <span class="hl">static/index.html</span> <span class="ann">— the Tenancy Ledger WebUI (single file, vanilla JS)</span>
+└── README.md</pre>
+
+    <div class="code-file animate" style="--i:1">
+      <div class="code-file__header">runbook — from empty to fully verified</div>
+      <pre class="code-file__body"><code><span class="hl">./run.sh</span>        <span class="c"># start the demo container (port 54329, localhost only)</span>
+<span class="hl">./test.sh</span>       <span class="c"># 26 SQL assertions — expect PASS: 26, FAIL: 0</span>
+<span class="hl">cd api && cargo run</span>  <span class="c"># start the API on 127.0.0.1:8081</span>
+<span class="hl">./api_test.sh</span>   <span class="c"># 27 HTTP assertions — expect PASS: 27, FAIL: 0</span>
+<span class="c"># open http://127.0.0.1:8081/  →  the WebUI</span>
+
+<span class="c"># env vars: DATABASE_URL (app_user) · AUDITOR_DATABASE_URL (superuser,</span>
+<span class="c">#            teacher mode only) · BIND (default 127.0.0.1:8081)</span>
+
+<span class="c"># schema change? recreate — the container has no persistent volume:</span>
+<span class="hl">./stop.sh && ./run.sh</span></code></pre>
+    </div>
+
+    <div class="table-wrap animate" style="--i:2">
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead><tr><th>Endpoint</th><th>Auth</th><th class="wide">Behaviour</th><th>Backed by</th></tr></thead>
+          <tbody>
+            <tr><td><code>GET /health</code></td><td>none</td><td class="wide">liveness</td><td>—</td></tr>
+            <tr><td><code>POST /login</code></td><td>none</td><td class="wide">verifies password in-DB, returns JWT</td><td><code>app.login()</code></td></tr>
+            <tr><td><code>GET /me</code></td><td>Bearer</td><td class="wide">the DB-verified identity</td><td><code>app.session_verify()</code></td></tr>
+            <tr><td><code>GET /documents</code></td><td>Bearer</td><td class="wide">RLS-filtered list for the token's tenant</td><td><code>app.session_claim()</code> policy</td></tr>
+            <tr><td><code>POST /documents</code></td><td>Bearer</td><td class="wide">insert; WITH CHECK validated by RLS → 403 on rejection</td><td>both policies</td></tr>
+            <tr><td><code>GET /demo/truth</code></td><td>Bearer</td><td class="wide">unfiltered table via superuser pool — powers the UI's redacted bars</td><td>demo-only</td></tr>
+            <tr><td><code>GET /</code> + static</td><td>none</td><td class="wide">the WebUI</td><td><code>ServeDir</code> fallback</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="callout animate" style="--i:3">
+      <strong>Takeaways.</strong> (1) Tenant identity must be a <em>verified claim</em>, never a settable
+      variable — and the verification can live in PostgreSQL itself, so no application layer needs the
+      key. (2) The role that owns tables must not be the role that runs the app. (3) Every claimed fix
+      here is a running assertion in <code>test.sh</code> or <code>api_test.sh</code> — 53 of them, all
+      green.
+    </div>
+
+  </div><!-- /main -->
+</div><!-- /wrap -->
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  import elkLayouts from 'https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk/dist/mermaid-layout-elk.esm.min.mjs';
+
+  const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+  mermaid.registerLayoutLoaders(elkLayouts);
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    look: 'classic',
+    layout: 'elk',
+    themeVariables: {
+      primaryColor: isDark ? '#16304a' : '#e8f1fa',
+      primaryBorderColor: isDark ? '#54a3dd' : '#1f6fb2',
+      primaryTextColor: isDark ? '#dbe7f2' : '#1c3547',
+      secondaryColor: isDark ? '#2a2110' : '#fdf3e3',
+      secondaryBorderColor: isDark ? '#e0b25c' : '#b07a12',
+      secondaryTextColor: isDark ? '#dbe7f2' : '#1c3547',
+      tertiaryColor: isDark ? '#2d1412' : '#fdeceb',
+      tertiaryBorderColor: isDark ? '#ef7d6f' : '#c0392b',
+      tertiaryTextColor: isDark ? '#dbe7f2' : '#1c3547',
+      lineColor: isDark ? '#86a0b8' : '#5c7387',
+      fontSize: '16px',
+      fontFamily: "'DM Sans', system-ui, sans-serif",
+      actorBkg: isDark ? '#16304a' : '#e8f1fa',
+      actorBorder: isDark ? '#54a3dd' : '#1f6fb2',
+      actorTextColor: isDark ? '#dbe7f2' : '#1c3547',
+      actorLineColor: isDark ? '#86a0b8' : '#5c7387',
+      signalColor: isDark ? '#86a0b8' : '#5c7387',
+      signalTextColor: isDark ? '#dbe7f2' : '#1c3547',
+      labelBoxBkgColor: isDark ? '#102338' : '#ffffff',
+      labelBoxBorderColor: isDark ? '#54a3dd' : '#1f6fb2',
+      labelTextColor: isDark ? '#dbe7f2' : '#1c3547',
+      loopTextColor: isDark ? '#86a0b8' : '#5c7387',
+      noteBkgColor: isDark ? '#2a2110' : '#fdf3e3',
+      noteBorderColor: isDark ? '#e0b25c' : '#b07a12',
+      noteTextColor: isDark ? '#dbe7f2' : '#1c3547',
+      activationBkgColor: isDark ? '#16304a' : '#d6e2ee',
+      activationBorderColor: isDark ? '#54a3dd' : '#174e7d',
+      sequenceNumberColor: isDark ? '#86a0b8' : '#5c7387',
+    }
+  });
+</script>
+
+<script>
+  var INITIAL_ZOOM = 1.2;
+
+  function zoomDiagram(btn, factor) {
+    var wrap = btn.closest('.mermaid-wrap');
+    var target = wrap.querySelector('.mermaid');
+    var current = parseFloat(target.dataset.zoom || INITIAL_ZOOM);
+    var next = Math.min(Math.max(current * factor, 0.5), 5);
+    target.dataset.zoom = next;
+    target.style.zoom = next;
+  }
+
+  function resetZoom(btn) {
+    var wrap = btn.closest('.mermaid-wrap');
+    var target = wrap.querySelector('.mermaid');
+    target.dataset.zoom = INITIAL_ZOOM;
+    target.style.zoom = INITIAL_ZOOM;
+  }
+
+  function openDiagramFullscreen(btn) {
+    var wrap = btn.closest('.mermaid-wrap');
+    openMermaidInNewTab(wrap);
+  }
+
+  function openMermaidInNewTab(wrap) {
+    var svg = wrap.querySelector('.mermaid svg');
+    if (!svg) return;
+
+    var clone = svg.cloneNode(true);
+    clone.style.zoom = '';
+    clone.style.transform = '';
+
+    var styles = getComputedStyle(document.documentElement);
+    var bg = styles.getPropertyValue('--bg').trim() || '#ffffff';
+
+    var html = '<!DOCTYPE html>' +
+      '<html lang="en"><head><meta charset="UTF-8">' +
+      '<meta name="viewport" content="width=device-width, initial-scale=1.0">' +
+      '<title>Diagram</title>' +
+      '<style>' +
+      'body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: ' + bg + '; padding: 40px; box-sizing: border-box; }' +
+      'svg { max-width: 100%; max-height: 90vh; height: auto; }' +
+      '</style></head><body>' +
+      clone.outerHTML +
+      '</body></html>';
+
+    var blob = new Blob([html], { type: 'text/html' });
+    var url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+  }
+
+  document.querySelectorAll('.mermaid-wrap').forEach(function (wrap) {
+    wrap.addEventListener('wheel', function (e) {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      var target = wrap.querySelector('.mermaid');
+      var current = parseFloat(target.dataset.zoom || INITIAL_ZOOM);
+      var factor = e.deltaY < 0 ? 1.1 : 0.9;
+      var next = Math.min(Math.max(current * factor, 0.5), 5);
+      target.dataset.zoom = next;
+      target.style.zoom = next;
+    }, { passive: false });
+
+    var startX, startY, scrollL, scrollT, startTime, didPan;
+    wrap.addEventListener('mousedown', function (e) {
+      if (e.target.closest('.zoom-controls')) return;
+      wrap.classList.add('is-panning');
+      startX = e.clientX;
+      startY = e.clientY;
+      scrollL = wrap.scrollLeft;
+      scrollT = wrap.scrollTop;
+      startTime = Date.now();
+      didPan = false;
+    });
+    window.addEventListener('mousemove', function (e) {
+      if (!wrap.classList.contains('is-panning')) return;
+      var dx = e.clientX - startX;
+      var dy = e.clientY - startY;
+      if (Math.abs(dx) > 5 || Math.abs(dy) > 5) didPan = true;
+      wrap.scrollLeft = scrollL - dx;
+      wrap.scrollTop = scrollT - dy;
+    });
+    window.addEventListener('mouseup', function () {
+      if (!wrap.classList.contains('is-panning')) return;
+      wrap.classList.remove('is-panning');
+      var elapsed = Date.now() - startTime;
+      if (!didPan && elapsed < 300) {
+        openMermaidInNewTab(wrap);
+      }
+    });
+  });
+
+  // TOC scroll spy
+  (function () {
+    var toc = document.getElementById('toc');
+    var links = toc.querySelectorAll('a');
+    var sections = [];
+    links.forEach(function (link) {
+      var id = link.getAttribute('href').slice(1);
+      var el = document.getElementById(id);
+      if (el) sections.push({ id: id, el: el, link: link });
+    });
+    var observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          links.forEach(function (l) { l.classList.remove('active'); });
+          var match = sections.find(function (s) { return s.el === entry.target; });
+          if (match) {
+            match.link.classList.add('active');
+            if (window.innerWidth <= 1000) {
+              match.link.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+            }
+          }
+        }
+      });
+    }, { rootMargin: '-10% 0px -80% 0px' });
+    sections.forEach(function (s) { observer.observe(s.el); });
+    links.forEach(function (link) {
+      link.addEventListener('click', function (e) {
+        e.preventDefault();
+        var id = link.getAttribute('href').slice(1);
+        var el = document.getElementById(id);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          history.replaceState(null, '', '#' + id);
+        }
+      });
+    });
+  })();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,786 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Tenancy Ledger — PostgreSQL RLS demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:    oklch(0.965 0.013 82);
+    --paper-2:  oklch(0.935 0.018 82);
+    --paper-3:  oklch(0.905 0.02 82);
+    --ink:      oklch(0.27 0.028 55);
+    --ink-soft: oklch(0.44 0.03 60);
+    --rule:     oklch(0.84 0.018 82);
+    --rule-ink: oklch(0.62 0.03 60);
+    --seal:     oklch(0.5 0.165 32);
+    --seal-soft: oklch(0.955 0.02 40);
+    --ok:       oklch(0.44 0.09 152);
+    --ok-soft:  oklch(0.95 0.025 152);
+    --tag-a:    oklch(0.55 0.12 65);
+    --tag-b:    oklch(0.5 0.1 225);
+    --font-display: "Fraunces", Georgia, serif;
+    --font-body: "Instrument Sans", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -10%, oklch(0.99 0.008 82), transparent),
+      repeating-linear-gradient(0deg, transparent 0 3px, oklch(0.97 0.012 82) 3px 4px);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.55;
+  }
+
+  .wrap { max-width: 1220px; margin: 0 auto; padding: 0 clamp(16px, 4vw, 48px) 80px; }
+
+  /* ------------------------------------------------ masthead */
+  .masthead {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 24px;
+    flex-wrap: wrap;
+    padding: clamp(28px, 5vw, 56px) 0 20px;
+    border-bottom: 3px solid var(--ink);
+  }
+  .kicker {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin: 0 0 10px;
+  }
+  .masthead h1 {
+    font-family: var(--font-display);
+    font-weight: 640;
+    font-optical-sizing: auto;
+    font-size: clamp(2.5rem, 6vw, 4.4rem);
+    line-height: 0.98;
+    letter-spacing: -0.02em;
+    margin: 0;
+  }
+  .masthead h1 em {
+    font-style: italic;
+    font-weight: 480;
+    color: var(--seal);
+  }
+  .subtitle {
+    margin: 14px 0 0;
+    font-size: clamp(0.95rem, 1.4vw, 1.08rem);
+    color: var(--ink-soft);
+    max-width: 46ch;
+  }
+  .mast-right {
+    display: flex;
+    align-items: center;
+    gap: 22px;
+  }
+  .stamp {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--seal);
+    border: 3px double var(--seal);
+    border-radius: 5px;
+    padding: 7px 10px 6px;
+    transform: rotate(-5deg);
+    opacity: 0.85;
+    user-select: none;
+  }
+  .session-chip {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    border: 1px solid var(--rule-ink);
+    padding: 8px 12px;
+    color: var(--ink-soft);
+    white-space: nowrap;
+    background: var(--paper);
+  }
+  .session-chip.live { color: var(--ok); border-color: var(--ok); background: var(--ok-soft); }
+
+  /* ------------------------------------------------ layout */
+  main {
+    display: grid;
+    grid-template-columns: minmax(280px, 360px) 1fr;
+    gap: clamp(20px, 3vw, 40px);
+    margin-top: 32px;
+    align-items: start;
+  }
+  .col { display: flex; flex-direction: column; gap: 28px; min-width: 0; }
+
+  .panel h2, .ledger-head h2, .journal-head h2 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 1.22rem;
+    margin: 0 0 14px;
+    letter-spacing: -0.01em;
+  }
+  .panel h2::before, .ledger-head h2::before, .journal-head h2::before {
+    content: attr(data-no) " · ";
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    color: var(--seal);
+    vertical-align: 2px;
+  }
+  .panel {
+    border: 1px solid var(--rule-ink);
+    background: oklch(0.99 0.006 82);
+    padding: 20px 22px 22px;
+    box-shadow: 4px 4px 0 -1px var(--paper-3);
+    animation: rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .panel:nth-child(2) { animation-delay: 0.07s; }
+
+  /* ------------------------------------------------ forms */
+  .stack { display: flex; flex-direction: column; gap: 12px; }
+  label { font-size: 0.86rem; font-weight: 600; color: var(--ink-soft); display: flex; flex-direction: column; gap: 5px; }
+  input[type="text"], input[type="email"], input[type="password"], textarea {
+    font: 400 0.92rem var(--font-body);
+    color: var(--ink);
+    background: var(--paper);
+    border: 1px solid var(--rule-ink);
+    border-radius: 3px;
+    padding: 9px 11px;
+    width: 100%;
+  }
+  input:focus, textarea:focus {
+    outline: 2px solid var(--seal);
+    outline-offset: 1px;
+    border-color: var(--seal);
+  }
+  label.check {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    font-weight: 500;
+  }
+  label.check input { width: auto; accent-color: var(--seal); }
+
+  button {
+    font: 600 0.88rem var(--font-body);
+    letter-spacing: 0.02em;
+    border-radius: 3px;
+    padding: 10px 16px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.15s;
+  }
+  button:active { transform: translateY(1px); }
+  .primary {
+    background: var(--ink);
+    color: var(--paper);
+    border: 1px solid var(--ink);
+  }
+  .primary:hover { background: var(--seal-deep, var(--seal)); border-color: var(--seal); }
+  .ghost {
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid var(--rule-ink);
+  }
+  .ghost:hover { border-color: var(--ink); background: var(--paper-2); }
+  .ghost.danger:hover { border-color: var(--seal); color: var(--seal); background: var(--seal-soft); }
+
+  .micro {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .hint {
+    font-size: 0.82rem;
+    color: var(--ink-soft);
+    margin: 14px 0 0;
+    line-height: 1.5;
+  }
+  .hint code {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    background: var(--paper-2);
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: var(--ink);
+  }
+
+  .demo-logins { margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--rule-ink); display: flex; flex-direction: column; gap: 8px; }
+  .demo-logins .micro { margin: 0 0 2px; }
+
+  /* ------------------------------------------------ facts (identity) */
+  dl.facts {
+    margin: 0 0 16px;
+    border: 1px solid var(--rule);
+    background: var(--paper);
+  }
+  dl.facts > div {
+    display: grid;
+    grid-template-columns: 92px 1fr;
+    border-bottom: 1px solid var(--rule);
+  }
+  dl.facts > div:last-child { border-bottom: 0; }
+  dl.facts dt {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    padding: 7px 10px;
+    border-right: 1px solid var(--rule);
+    background: var(--paper-2);
+  }
+  dl.facts dd {
+    margin: 0;
+    padding: 7px 10px;
+    font-size: 0.85rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  dl.facts dd.mono { font-family: var(--font-mono); font-size: 0.78rem; }
+
+  /* ------------------------------------------------ ledger */
+  .ledger-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+  .counts { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.06em; color: var(--ink-soft); }
+  .counts b { color: var(--ink); font-weight: 500; }
+  .counts .redacted { color: var(--seal); }
+
+  .truth-line {
+    font-size: 0.8rem;
+    color: var(--ink-soft);
+    margin: 0 0 10px;
+    padding: 8px 12px;
+    border-left: 3px solid var(--seal);
+    background: var(--seal-soft);
+    animation: rise 0.4s ease-out both;
+  }
+
+  .table-wrap { overflow-x: auto; border: 1px solid var(--rule-ink); background: oklch(0.99 0.006 82); }
+  table.ledger {
+    width: 100%;
+    border-collapse: collapse;
+    background-image: repeating-linear-gradient(to bottom, transparent 0 31px, var(--rule) 31px 32px);
+    font-size: 0.88rem;
+  }
+  table.ledger th {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    text-align: left;
+    color: var(--ink-soft);
+    padding: 10px 12px;
+    border-bottom: 2px solid var(--rule-ink);
+    background: var(--paper-2);
+    white-space: nowrap;
+  }
+  table.ledger td {
+    padding: 7px 12px;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+    line-height: 1.45;
+  }
+  table.ledger tbody tr { animation: rise 0.35s cubic-bezier(0.22, 1, 0.36, 1) both; }
+  table.ledger tbody tr:hover { background: oklch(0.955 0.012 82); }
+  td.num { font-family: var(--font-mono); font-size: 0.78rem; color: var(--ink-soft); text-align: right; }
+  td.title { font-weight: 600; }
+  td.body { color: var(--ink-soft); max-width: 38ch; }
+  td.pub { font-family: var(--font-mono); text-align: center; }
+  td.pub.yes { color: var(--ok); }
+  td.pub.no  { color: var(--seal); }
+  td.when { font-family: var(--font-mono); font-size: 0.72rem; color: var(--ink-soft); white-space: nowrap; }
+
+  .tag {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    border: 1px solid;
+    border-radius: 3px;
+    padding: 1px 6px 0;
+  }
+  .tag-a { color: var(--tag-a); border-color: var(--tag-a); background: oklch(0.965 0.02 65); }
+  .tag-b { color: var(--tag-b); border-color: var(--tag-b); background: oklch(0.965 0.018 225); }
+
+  /* redacted rows — the rows RLS hides from this tenant */
+  tr.hidden { opacity: 1; }
+  tr.hidden td { color: var(--ink-soft); }
+  .redact {
+    display: inline-block;
+    background: var(--ink);
+    color: transparent;
+    user-select: none;
+    border-radius: 2px;
+    padding: 0 2px;
+    letter-spacing: 1px;
+    min-width: 7ch;
+    max-width: 26ch;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .blocked-note {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--seal);
+    border: 1px solid var(--seal);
+    padding: 1px 6px 0;
+    margin-left: 8px;
+    border-radius: 2px;
+    vertical-align: 1px;
+    white-space: nowrap;
+  }
+
+  .empty {
+    font-size: 0.9rem;
+    color: var(--ink-soft);
+    border: 1px dashed var(--rule-ink);
+    padding: 26px 22px;
+    margin-top: 14px;
+    line-height: 1.6;
+  }
+  .empty b { color: var(--ink); }
+
+  /* ------------------------------------------------ journal */
+  .journal {
+    margin-top: clamp(36px, 6vw, 64px);
+    border-top: 3px solid var(--ink);
+    padding-top: 22px;
+  }
+  .journal-head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+  .journal ol {
+    list-style: none;
+    margin: 16px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 340px;
+    overflow-y: auto;
+  }
+  .journal li {
+    border: 1px solid var(--rule);
+    background: oklch(0.99 0.006 82);
+    animation: rise 0.3s ease-out both;
+  }
+  .journal summary {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 12px;
+    cursor: pointer;
+    list-style: none;
+  }
+  .journal summary::-webkit-details-marker { display: none; }
+  .journal li[open] summary { border-bottom: 1px dashed var(--rule-ink); }
+  .method {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    color: var(--paper);
+    background: var(--ink);
+    border-radius: 3px;
+    padding: 2px 7px;
+    min-width: 46px;
+    text-align: center;
+  }
+  .method.post { background: var(--seal); }
+  .path { font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink); }
+  .status {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    border-radius: 3px;
+    padding: 2px 7px;
+    border: 1px solid;
+    white-space: nowrap;
+  }
+  .status.ok   { color: var(--ok);   border-color: var(--ok);   background: var(--ok-soft); }
+  .status.bad  { color: var(--seal); border-color: var(--seal); background: var(--seal-soft); }
+  .status.grey { color: var(--ink-soft); border-color: var(--rule-ink); }
+  .stamp-inline {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--seal);
+    border: 2px double var(--seal);
+    border-radius: 4px;
+    padding: 2px 6px 1px;
+    transform: rotate(-4deg);
+    white-space: nowrap;
+  }
+  .journal pre {
+    margin: 0;
+    padding: 10px 14px;
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    line-height: 1.5;
+    overflow-x: auto;
+    color: var(--ink-soft);
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  .journal li:has(.stamp-inline) { border-color: var(--seal); }
+
+  footer {
+    margin-top: 48px;
+    padding-top: 16px;
+    border-top: 1px solid var(--rule);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  /* ------------------------------------------------ motion */
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+
+  @media (max-width: 920px) {
+    main { grid-template-columns: 1fr; }
+    .masthead { align-items: flex-start; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <div>
+      <p class="kicker">PostgreSQL · Row Level Security · Field Demo</p>
+      <h1>The <em>Tenancy</em> Ledger</h1>
+      <p class="subtitle">One table, <code>app.documents</code>, holding rows for two tenants. The database decides who may see what — the API only tells it who is asking.</p>
+    </div>
+    <div class="mast-right">
+      <div class="stamp" aria-hidden="true">Demo</div>
+      <div class="session-chip" id="sessionChip">No session</div>
+    </div>
+  </header>
+
+  <main>
+    <div class="col">
+      <section class="panel" aria-label="identity">
+        <h2 data-no="01">Identity</h2>
+        <dl class="facts" id="facts" hidden>
+          <div><dt>Holder</dt><dd id="factName">—</dd></div>
+          <div><dt>Tenant</dt><dd id="factTenant" class="mono">—</dd></div>
+          <div><dt>User id</dt><dd id="factSub" class="mono">—</dd></div>
+          <div><dt>Token</dt><dd id="factToken" class="mono" title="">—</dd></div>
+        </dl>
+
+        <form id="loginForm" class="stack">
+          <label>Email
+            <input id="loginEmail" type="email" autocomplete="username" placeholder="alice@alpha.example" required>
+          </label>
+          <label>Password
+            <input id="loginPassword" type="password" autocomplete="current-password" placeholder="••••••••" required>
+          </label>
+          <button class="primary" type="submit">Sign in</button>
+        </form>
+
+        <div class="demo-logins">
+          <p class="micro">or jump straight to a demo identity</p>
+          <button class="ghost" type="button" data-email="alice@alpha.example" data-pass="alice-password">Alice — tenant A</button>
+          <button class="ghost" type="button" data-email="bob@beta.example" data-pass="bob-password">Bob — tenant B</button>
+        </div>
+
+        <p class="hint" style="margin-top:14px;">The tenant id never comes from this page — it is sealed inside a JWT that <em>PostgreSQL itself signs</em> (this server holds no secret), after the database checks your password.</p>
+
+        <button id="logoutBtn" class="ghost danger" type="button" style="margin-top:14px;" hidden>End session</button>
+      </section>
+
+      <section class="panel" aria-label="compose">
+        <h2 data-no="02">Compose entry</h2>
+        <form id="createForm" class="stack">
+          <label>Title
+            <input id="newTitle" type="text" placeholder="Quarterly forecast" required>
+          </label>
+          <label>Body
+            <textarea id="newBody" rows="3" required></textarea>
+          </label>
+          <label class="check"><input id="newPublished" type="checkbox" checked> published</label>
+          <button class="primary" type="submit">Post to ledger</button>
+        </form>
+        <p class="hint">Flip <em>published</em> off and post: the restrictive <code>WITH CHECK</code> policy rejects the write with <code>403</code> — the journal below will show the database's own message.</p>
+      </section>
+    </div>
+
+    <section class="col" aria-label="ledger">
+      <div class="ledger-head">
+        <h2 data-no="03">app.documents</h2>
+        <div class="counts" id="counts">sign in to open the ledger</div>
+      </div>
+      <div class="truth-line" id="truthLine" hidden></div>
+      <div class="table-wrap">
+        <table class="ledger">
+          <thead>
+            <tr><th>#</th><th>Title</th><th>Body</th><th>Tenant</th><th>Pub</th><th>Created</th></tr>
+          </thead>
+          <tbody id="ledgerBody"></tbody>
+        </table>
+      </div>
+      <p class="empty" id="emptyLedger"><b>The ledger is closed.</b> Without a session there is no tenant context, and RLS returns <b>zero</b> rows — the default deny.</p>
+    </section>
+  </main>
+
+  <section class="journal">
+    <div class="journal-head">
+      <h2 data-no="04">Request journal</h2>
+      <span class="micro">every call this browser made to the API — status included</span>
+    </div>
+    <ol id="journal"></ol>
+  </section>
+
+  <footer>
+    <span>postgres 16 · podman · rust/axum + jwt</span>
+    <span>redacted rows are drawn from a superuser-only teacher endpoint — production apps never expose one</span>
+  </footer>
+
+</div>
+
+<script>
+"use strict";
+(function () {
+  const state = { token: null, me: null };
+
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const short = (s, n) => (s.length > n ? s.slice(0, n) + "…" : s);
+
+  /* ------------------------------------------------------- api */
+  async function api(method, path, body) {
+    const headers = {};
+    if (state.token) headers["Authorization"] = "Bearer " + state.token;
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    let res, json = null;
+    try {
+      res = await fetch(path, {
+        method,
+        headers,
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      });
+      try { json = await res.json(); } catch (_) { /* non-JSON */ }
+    } catch (err) {
+      journal(method, path, 0, { error: "network failure: " + err.message });
+      return { status: 0, json: null };
+    }
+    journal(method, path, res.status, json);
+    return { status: res.status, json };
+  }
+
+  function journal(method, path, status, json) {
+    const ol = $("journal");
+    const li = document.createElement("li");
+    const ok = status >= 200 && status < 300;
+    const one = json ? (json.detail || json.error || (json.count !== undefined ? json.count + " documents" : json.total !== undefined ? json.total + " rows (teacher view)" : "ok")) : "";
+    const statusClass = status === 0 ? "grey" : ok ? "ok" : "bad";
+    const statusLabel = status === 0 ? "ERR" : String(status);
+    const stamp = status === 403 ? '<span class="stamp-inline">rejected</span>' : "";
+    li.innerHTML =
+      "<details" + (status >= 400 ? " open" : "") + ">" +
+      "<summary>" +
+      '<span class="method ' + (method === "POST" ? "post" : "get") + '">' + method + "</span>" +
+      '<span class="path">' + esc(path) + "</span>" +
+      '<span class="status ' + statusClass + '">' + statusLabel + "</span>" +
+      stamp +
+      "</summary>" +
+      "<pre>" + esc(JSON.stringify(json, null, 2)) + "</pre>" +
+      "</details>";
+    if (one) {
+      const note = document.createElement("span");
+      note.className = "path";
+      note.style.marginLeft = "12px";
+      note.style.color = "var(--ink-soft)";
+      note.textContent = short(String(one), 90);
+      li.querySelector("summary").appendChild(note);
+    }
+    ol.prepend(li);
+    while (ol.children.length > 20) ol.removeChild(ol.lastChild);
+  }
+
+  /* ------------------------------------------------------- auth */
+  async function login(email, password) {
+    const r = await api("POST", "/login", { email, password });
+    if (r.status === 200) {
+      state.token = r.json.token;
+      $("loginEmail").value = email;
+      $("loginPassword").value = "";
+      await refresh(true);
+    } else {
+      $("loginPassword").value = "";
+      $("loginPassword").focus();
+    }
+  }
+
+  function logout() {
+    state.token = null;
+    state.me = null;
+    $("sessionChip").textContent = "No session";
+    $("sessionChip").classList.remove("live");
+    $("loginForm").hidden = false;
+    $("facts").hidden = true;
+    $("logoutBtn").hidden = true;
+    $("counts").textContent = "sign in to open the ledger";
+    $("truthLine").hidden = true;
+    $("ledgerBody").innerHTML = "";
+    $("emptyLedger").innerHTML = "<b>The ledger is closed.</b> Without a session there is no tenant context, and RLS returns <b>zero</b> rows — the default deny.";
+    journal("GET", "/logout (local)", 200, { note: "token discarded from this browser only; the JWT stays valid until it expires" });
+  }
+
+  /* ------------------------------------------------------- data */
+  async function refresh(showTruth) {
+    const r = await api("GET", "/me");
+    if (r.status !== 200) { logout(); return; }
+    state.me = r.json;
+    $("sessionChip").textContent = r.json.display_name + " — tenant " + short(r.json.tenant_id, 8);
+    $("sessionChip").classList.add("live");
+    $("loginForm").hidden = true;
+    $("logoutBtn").hidden = false;
+    $("facts").hidden = false;
+    $("factName").textContent = r.json.display_name;
+    $("factTenant").textContent = r.json.tenant_id;
+    $("factSub").textContent = r.json.user_id;
+    $("factToken").textContent = short(state.token, 26) + "…";
+    $("factToken").title = state.token;
+
+    await renderLedger(showTruth);
+  }
+
+  async function renderLedger(showTruth) {
+    const r = await api("GET", "/documents");
+    if (r.status !== 200) return;
+    const visible = r.json.documents || [];
+    const visibleIds = new Set(visible.map((d) => d.id));
+
+    let truth = null;
+    if (showTruth !== false) {
+      const t = await api("GET", "/demo/truth");
+      if (t.status === 200) truth = t.json;
+    }
+
+    const all = truth ? truth.documents : visible;
+    const tbody = $("ledgerBody");
+    tbody.innerHTML = "";
+
+    for (const doc of all) {
+      const hidden = !visibleIds.has(doc.id);
+      const tr = document.createElement("tr");
+      if (hidden) tr.className = "hidden";
+      const tenantTag = '<span class="tag ' + (doc.tenant_id.startsWith("11111111") ? "tag-a" : "tag-b") + '">' +
+        (doc.tenant_id.startsWith("11111111") ? "A" : "B") + "</span>";
+      const pubCell = hidden
+        ? '<span class="redact">pub</span>'
+        : doc.published ? '<span class="pub yes">✓</span>' : '<span class="pub no">✗</span>';
+      const created = hidden ? '<span class="redact">when</span>' : esc(doc.created_at);
+      const blocked = hidden ? '<span class="blocked-note">blocked by RLS</span>' : "";
+      tr.innerHTML =
+        '<td class="num">' + doc.id + "</td>" +
+        '<td class="title">' + (hidden ? '<span class="redact">' + esc(doc.title) + "</span>" : esc(doc.title)) + blocked + "</td>" +
+        '<td class="body">' + (hidden ? '<span class="redact">' + esc(doc.body) + "</span>" : esc(doc.body)) + "</td>" +
+        "<td>" + tenantTag + "</td>" +
+        "<td>" + pubCell + "</td>" +
+        '<td class="when">' + created + "</td>";
+      tbody.appendChild(tr);
+    }
+
+    $("counts").innerHTML =
+      "<b>your view:</b> " + visible.length +
+      (truth ? ' · <b>table holds:</b> ' + truth.total + ' · <span class="redacted">redacted from this view: ' + (truth.total - visible.length) + "</span>" : "");
+
+    if (truth) {
+      $("truthLine").hidden = false;
+      $("truthLine").textContent = truth.note;
+    } else {
+      $("truthLine").hidden = true;
+    }
+
+    $("emptyLedger").hidden = visible.length > 0 || (truth && truth.total > 0);
+  }
+
+  /* ------------------------------------------------------- create */
+  async function createDoc(e) {
+    e.preventDefault();
+    if (!state.token) return;
+    const title = $("newTitle").value.trim();
+    const body = $("newBody").value.trim();
+    if (!title || !body) return;
+    const r = await api("POST", "/documents", {
+      title, body, published: $("newPublished").checked,
+    });
+    if (r.status === 201) {
+      $("newTitle").value = "";
+      $("newBody").value = "";
+      $("newPublished").checked = true;
+      await renderLedger();
+    }
+  }
+
+  /* ------------------------------------------------------- events */
+  $("loginForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    login($("loginEmail").value, $("loginPassword").value);
+  });
+
+  document.querySelectorAll(".demo-logins button").forEach((b) => {
+    b.addEventListener("click", () => login(b.dataset.email, b.dataset.pass));
+  });
+
+  $("logoutBtn").addEventListener("click", logout);
+  $("createForm").addEventListener("submit", createDoc);
+
+  // restore a previous session (token survives a reload via sessionStorage)
+  const saved = sessionStorage.getItem("rls-demo-token");
+  if (saved) {
+    state.token = saved;
+    refresh(true).catch(() => logout());
+  }
+
+  // persist the token across reloads within this tab
+  window.addEventListener("pagehide", () => {
+    if (state.token) sessionStorage.setItem("rls-demo-token", state.token);
+    else sessionStorage.removeItem("rls-demo-token");
+  });
+})();
+</script>
+</body>
+</html>

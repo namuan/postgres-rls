@@ -1,0 +1,15 @@
+[package]
+name = "rls-api"
+version = "0.1.0"
+edition = "2021"
+description = "Rust API server demonstrating the trusted boundary for PostgreSQL Row Level Security"
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
+tokio-postgres = { version = "0.7", features = ["with-uuid-1"] }
+uuid = { version = "1", features = ["v4"] }
+deadpool-postgres = "0.14"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tower-http = { version = "0.6", features = ["fs"] }
