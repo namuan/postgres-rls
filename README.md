@@ -43,6 +43,8 @@ api/                    Rust API server (axum + tokio-postgres) and static/ WebU
 api/env.example         Documented env vars for the API (copy to .env locally)
 api/properties/         proptest crate: 5 randomized security properties
 api_test.sh             HTTP-level end-to-end assertions against the API
+bench.sh                Benchmark harness: pgbench auth primitives + k6 end-to-end load
+bench/load.js           k6 scenario: 85% reads / 10% writes / 5% logins, two tenants
 api.http                IntelliJ HTTP Client requests — try every endpoint from the IDE
 postgres-rls-process.html   Visual walkthrough of the whole system (open in a browser)
 README.md               This file
@@ -100,6 +102,7 @@ holes, and the full test matrix. Open it in any browser.
 ./test.sh                         # SQL-level assertions (expect PASS: 26, FAIL: 0)
 ./api_test.sh                     # HTTP-level assertions (expect PASS: 27, FAIL: 0)
 ./property_test.sh                # randomized security properties (576 cases, all held)
+./bench.sh                        # benchmark auth-in-the-DB scalability (see below)
 ```
 
 `./run.sh` is **idempotent**: running it again stops the running API and
@@ -273,6 +276,66 @@ Remaining production notes (not closed in a demo, by nature):
   denylist table checked inside `app.session_claim()`, or shorten TTLs.
 - **TLS**: the API and the database connection should be TLS in production
   (`sslmode=require` + certificates); the demo is localhost-only.
+
+## Benchmarking: how well does auth-in-the-database scale?
+
+`bench.sh` answers the two questions that matter — *is login CPU-bound in the
+DB?* and *does per-request verification cost anything?* — with a reproducible
+two-layer benchmark:
+
+- **Layer 1 (pgbench, in-container):** the auth primitives in isolation —
+  `app.login()` (bcrypt cost 10) and one full authenticated request as the DB
+  sees it (`app.session_verify()` + `app.session_claim()` + one RLS-filtered
+  `SELECT`, all in a single transaction, exactly like the API does).
+- **Layer 2 (k6, `bench/load.js`):** the real API under a realistic mix
+  (85% authenticated reads, 10% writes, 5% logins) across both tenants,
+  with peak container CPU sampled while the test runs.
+
+```bash
+./bench.sh                        # default: 50 VUs, 30s steady state
+./bench.sh --vus 100 --duration 60s
+./bench.sh --no-writes            # read/login only — inserts nothing
+```
+
+### Findings (measured on an Apple Silicon M-series podman machine, 30 VUs)
+
+| Measurement | Result | Meaning |
+| --- | --- | --- |
+| `app.login()` — bcrypt cost 10 | ~54 logins/s | Saturates roughly one core — the **only** expensive primitive |
+| session verify + RLS (one request, DB side) | ~8,500 req/s | HMAC + claim checks are microseconds — not a bottleneck |
+| End-to-end API (30 VUs) | ~300 req/s, 0% failures | Peak DB CPU ~60% during the run |
+| Read p50 / p95 / p99 | ~70 / 120 / 130 ms | Largely connection-pool queueing, not auth |
+| Login p50 / p95 / p99 | ~140 / 180 / 190 ms | bcrypt (~50–80 ms) plus pool queueing |
+
+Numbers are machine-dependent — `./bench.sh` re-measures them on every run and
+prints a comparison table with the interpretation built in.
+
+### Recommendations
+
+1. **Keep bcrypt out of the hot path — but it does not need to leave the DB
+   yet.** At ~54 logins/s per core, the in-DB login is fine for typical rates
+   (a 5% login mix barely registered). If login volume grows, move the bcrypt
+   check to the app tier; the JWT secret can stay in the database, with minting
+   still done by a SECURITY DEFINER function.
+2. **Per-request verification is a rounding error.** ~8,500 verified
+   requests/s means the per-request "auth tax" of this design is negligible
+   next to any real query. The `app.session_claim()` re-verification that
+   policies call costs microseconds — keep it: it is the property that makes
+   `SET app.tenant_id` meaningless.
+3. **The real scaling unit is DB connections, not auth.** Every in-flight
+   request holds one connection for its full duration. The API pool is capped
+   at 5 (`api/src/main.rs`) — the first knob to turn — and `max_connections`
+   (default 100) is the ceiling after that. PgBouncer in transaction mode is
+   the standard next step.
+4. **Scale horizontally with stateless replicas.** Tokens are stateless JWT,
+   so API replicas scale linearly until the database saturates. Watch peak DB
+   CPU during a run: if it pins at ~100% while req/s plateaus, the database is
+   the ceiling — raise it with a bigger instance, read replicas (the secret
+   table must be replicated for in-DB verification, or route verification to
+   the primary), or connection pooling.
+5. **Re-run at increasing VUs to find your saturation point.**
+   `./bench.sh --vus 30` → `60` → `120`: if throughput scales with VUs, the
+   API tier is the limit; if it plateaus with DB CPU at ~100%, the database is.
 
 ## Troubleshooting
 
