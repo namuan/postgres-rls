@@ -6,7 +6,7 @@
 
 # --- Rust (api/) ---
 # Build output
-api/target/
+**/target/
 # Cargo.lock is intentionally committed: this is a binary crate, not a library.
 
 # --- Environment / secrets ---

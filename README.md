@@ -38,12 +38,36 @@ sql/00-init.sql         Roles, schema, tables, seed data, RLS policies, auth, gr
 run.sh                  Recreates and starts the demo container (Podman)
 stop.sh                 Removes the demo container
 test.sh                 SQL-level RLS assertions (positive and expected-failure)
+property_test.sh        Property-based security suite (proptest, differential)
 api/                    Rust API server (axum + tokio-postgres) and static/ WebUI
 api/env.example         Documented env vars for the API (copy to .env locally)
+api/properties/         proptest crate: 5 randomized security properties
 api_test.sh             HTTP-level end-to-end assertions against the API
 postgres-rls-process.html   Visual walkthrough of the whole system (open in a browser)
 README.md               This file
 ```
+
+## Property-based testing
+
+Example-based suites (`test.sh`, `api_test.sh`) check fixed inputs. The
+property suite (`property_test.sh` → `api/properties/`) checks *invariants*
+over thousands of randomized states and operations, using differential
+testing: every RLS-filtered view is compared against a model predicate
+(`tenant = T AND published`) computed from the superuser ground truth.
+
+| Property | Invariant checked | Cases |
+| --- | --- | --- |
+| `visible_set_matches_model` | For any tenant and any document set, the API returns exactly the model's rows | 128 |
+| `cross_tenant_isolation` | Random sequences of login/create/list ops never break the model; unauthenticated probes are always 401 (no pooled-session leaks) | 64 |
+| `write_check_enforced` | `POST /documents` → 201 iff `published`; rows stamped with the session tenant; no cross-tenant visibility after writes | 128 |
+| `token_forgery_rejected` | Every mutation of a valid token (bit flips, truncation, forged signatures, expired claims) → 401 | 128 |
+| `auth_and_claims` | Login succeeds iff the password matches; JWT claims (sub, tenant, 24 h TTL) match the users table | 128 |
+
+It already earned its keep: on the first run it caught a real defect — a
+bit-flipped signature containing a non-base64 character made PostgreSQL
+raise, turning a should-be-401 into a **500**. `app.url_decode()` and the
+verify functions now swallow malformed input (`NULL` → clean denial). The
+fix is covered by the same property that found it.
 
 ## Visual walkthrough
 
@@ -69,6 +93,7 @@ holes, and the full test matrix. Open it in any browser.
 cd api && cargo run               # start the API server
 # in another shell:
 ./api_test.sh                     # HTTP-level assertions (expect PASS: 27, FAIL: 0)
+./property_test.sh                # randomized security properties (576 cases, all held)
 ```
 
 Open **http://127.0.0.1:8081/** for the WebUI (see below).

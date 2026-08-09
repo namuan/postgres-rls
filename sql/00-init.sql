@@ -107,8 +107,12 @@ LANGUAGE sql IMMUTABLE STRICT AS $$
 $$;
 
 CREATE FUNCTION app.url_decode(p text) RETURNS bytea
-LANGUAGE sql IMMUTABLE STRICT AS $$
-  SELECT decode(rpad(translate(p, '-_', '+/'), ((length(p) + 3) / 4) * 4, '='), 'base64')
+LANGUAGE plpgsql IMMUTABLE STRICT AS $$
+BEGIN
+  RETURN decode(rpad(translate(p, '-_', '+/'), ((length(p) + 3) / 4) * 4, '='), 'base64');
+EXCEPTION WHEN others THEN
+  RETURN NULL;  -- malformed input is a clean NULL, never an error
+END
 $$;
 
 -- Mint a signed token for a user whose password matches.  Returns one row
@@ -188,8 +192,8 @@ BEGIN
   SELECT secret INTO v_secret FROM app.jwt_secret WHERE id = 1;
   computed := public.hmac(parts[1] || '.' || parts[2], v_secret, 'sha256');
   sig      := app.url_decode(parts[3]);
-  IF computed <> sig THEN
-    RETURN;  -- signature mismatch: forged or corrupted
+  IF sig IS NULL OR computed <> sig THEN
+    RETURN;  -- undecodable, forged or corrupted
   END IF;
 
   payload := convert_from(app.url_decode(parts[2]), 'UTF8')::jsonb;
@@ -209,6 +213,8 @@ BEGIN
     SELECT (payload ->> 'sub')::bigint,
            (payload ->> 'tenant_id')::uuid,
            payload ->> 'display_name';
+EXCEPTION WHEN others THEN
+  RETURN;  -- any malformed token is a clean denial (401), never an error
 END
 $$;
 
@@ -243,7 +249,7 @@ BEGIN
   SELECT secret INTO v_secret FROM app.jwt_secret WHERE id = 1;
   computed := public.hmac(parts[1] || '.' || parts[2], v_secret, 'sha256');
   sig      := app.url_decode(parts[3]);
-  IF computed <> sig THEN
+  IF sig IS NULL OR computed <> sig THEN
     RETURN NULL;
   END IF;
 
@@ -254,6 +260,8 @@ BEGIN
   END IF;
 
   RETURN payload ->> p_name;
+EXCEPTION WHEN others THEN
+  RETURN NULL;  -- malformed session value is a clean NULL, never an error
 END
 $$;
 
