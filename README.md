@@ -43,9 +43,18 @@ api/                    Rust API server (axum + tokio-postgres) and static/ WebU
 api/env.example         Documented env vars for the API (copy to .env locally)
 api/properties/         proptest crate: 5 randomized security properties
 api_test.sh             HTTP-level end-to-end assertions against the API
+api.http                IntelliJ HTTP Client requests — try every endpoint from the IDE
 postgres-rls-process.html   Visual walkthrough of the whole system (open in a browser)
 README.md               This file
 ```
+
+## Try it in IntelliJ IDEA
+
+Open `api.http` in any JetBrains IDE (HTTP Client is bundled) and press
+**Run All** — the two login requests capture their JWTs into client
+variables, and every request carries inline assertions (the same properties
+as the shell suites). Start the stack first: `./run.sh` then
+`cd api && cargo run`.
 
 ## Property-based testing
 

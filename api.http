@@ -1,0 +1,187 @@
+### ============================================================
+### PostgreSQL RLS demo — HTTP Client requests (IntelliJ IDEA)
+###
+### How to use:
+###   1. Start the stack:  ./run.sh  &&  cd api && cargo run
+###   2. Open this file in IntelliJ IDEA (HTTP Client is bundled).
+###   3. Run requests in order — or "Run All" from the gutter.
+###      The two login requests store their tokens into client
+###      globals (alice_token / bob_token) used below, so run
+###      them at least once before the authenticated requests.
+###   4. Green checks in the response panel are client tests —
+###      the same properties asserted by test.sh, api_test.sh
+###      and property_test.sh.
+###
+### NOTE: requests 5/6 assert the seeded row counts (3 and 2).
+### If earlier runs added documents, recreate the database first:
+###   ./stop.sh && ./run.sh
+### ============================================================
+
+@baseUrl = http://127.0.0.1:8081
+
+### 0. Health — liveness
+GET {{baseUrl}}/health
+
+> {%
+    client.test("health returns 200", function () {
+        client.assert(response.status === 200, "expected 200, got " + response.status);
+    });
+%}
+
+### 1. Login as Alice (tenant A)
+### The database verifies the password (pgcrypto bcrypt) and mints the JWT
+### (app.login, SECURITY DEFINER). The API holds no secret.
+POST {{baseUrl}}/login
+Content-Type: application/json
+
+{
+  "email": "alice@alpha.example",
+  "password": "alice-password"
+}
+
+> {%
+    client.global.set("alice_token", response.body.token);
+    client.test("alice login succeeds with tenant A claim", function () {
+        client.assert(response.status === 200, "expected 200, got " + response.status);
+        client.assert(response.body.tenant_id === "11111111-1111-1111-1111-111111111111",
+            "expected tenant A, got " + response.body.tenant_id);
+    });
+%}
+
+### 2. Login as Bob (tenant B)
+POST {{baseUrl}}/login
+Content-Type: application/json
+
+{
+  "email": "bob@beta.example",
+  "password": "bob-password"
+}
+
+> {%
+    client.global.set("bob_token", response.body.token);
+    client.test("bob login succeeds with tenant B claim", function () {
+        client.assert(response.status === 200, "expected 200, got " + response.status);
+        client.assert(response.body.tenant_id === "22222222-2222-2222-2222-222222222222",
+            "expected tenant B, got " + response.body.tenant_id);
+    });
+%}
+
+### 3. Wrong password — 401 (bcrypt rejects; no error oracle)
+POST {{baseUrl}}/login
+Content-Type: application/json
+
+{
+  "email": "alice@alpha.example",
+  "password": "wrong-password"
+}
+
+> {%
+    client.test("wrong password is rejected", function () {
+        client.assert(response.status === 401, "expected 401, got " + response.status);
+    });
+%}
+
+### 4. Who am I — claims from the DB-verified session (app.session_verify)
+GET {{baseUrl}}/me
+Authorization: Bearer {{alice_token}}
+
+> {%
+    client.test("identity matches the token", function () {
+        client.assert(response.status === 200, "expected 200, got " + response.status);
+        client.assert(response.body.tenant_id === "11111111-1111-1111-1111-111111111111",
+            "expected tenant A, got " + response.body.tenant_id);
+    });
+%}
+
+### 5. Documents as Alice — exactly her 3 published rows
+### (tenant_isolation permissive policy AND published_only restrictive)
+GET {{baseUrl}}/documents
+Authorization: Bearer {{alice_token}}
+
+> {%
+    client.test("alice sees exactly 3 documents", function () {
+        client.assert(response.status === 200, "expected 200, got " + response.status);
+        client.assert(response.body.count === 3, "expected 3, got " + response.body.count);
+    });
+%}
+
+### 6. Documents as Bob — 2 rows; Alice's rows are invisible to him
+GET {{baseUrl}}/documents
+Authorization: Bearer {{bob_token}}
+
+> {%
+    client.test("bob sees exactly 2 documents", function () {
+        client.assert(response.status === 200, "expected 200, got " + response.status);
+        client.assert(response.body.count === 2, "expected 2, got " + response.body.count);
+    });
+%}
+
+### 7. Create a published document as Alice — 201.
+### The tenant comes from the token claims, never from the request body.
+POST {{baseUrl}}/documents
+Authorization: Bearer {{alice_token}}
+Content-Type: application/json
+
+{
+  "title": "HTTP Client Entry",
+  "body": "created from IntelliJ",
+  "published": true
+}
+
+> {%
+    client.test("published write succeeds and is stamped with the session tenant", function () {
+        client.assert(response.status === 201, "expected 201, got " + response.status);
+        client.assert(response.body.tenant_id === "11111111-1111-1111-1111-111111111111",
+            "expected tenant A, got " + response.body.tenant_id);
+    });
+%}
+
+### 8. Create with published=false — the restrictive policy's WITH CHECK
+###    rejects the write with 403 (same property as api_test.sh)
+POST {{baseUrl}}/documents
+Authorization: Bearer {{alice_token}}
+Content-Type: application/json
+
+{
+  "title": "Draft Attempt",
+  "body": "should be rejected",
+  "published": false
+}
+
+> {%
+    client.test("unpublished write is rejected by WITH CHECK", function () {
+        client.assert(response.status === 403, "expected 403, got " + response.status);
+    });
+%}
+
+### 9. Teacher mode (demo-only) — the superuser pool sees the unfiltered
+###    table. This is what powers the WebUI's redacted rows. Compare its
+###    count with requests 5 and 6 to see what RLS hides.
+GET {{baseUrl}}/demo/truth
+Authorization: Bearer {{alice_token}}
+
+> {%
+    client.test("teacher view shows the full table", function () {
+        client.assert(response.status === 200, "expected 200, got " + response.status);
+        client.assert(response.body.total >= 7, "expected >= 7, got " + response.body.total);
+    });
+%}
+
+### 10. No token — 401 (default deny: no verified session, no rows)
+GET {{baseUrl}}/documents
+
+> {%
+    client.test("unauthenticated request is rejected", function () {
+        client.assert(response.status === 401, "expected 401, got " + response.status);
+    });
+%}
+
+### 11. Tampered token — one extra character breaks the HMAC check -> 401
+GET {{baseUrl}}/me
+Authorization: Bearer {{alice_token}}corrupt
+
+> {%
+    client.test("tampered token is rejected", function () {
+        client.assert(response.status === 401, "expected 401, got " + response.status);
+    });
+%}
